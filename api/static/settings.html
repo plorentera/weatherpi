@@ -1,0 +1,209 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Configuración de la estación meteorológica" />
+  <title>Configuración - Meteo Station</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-body-tertiary">
+  <nav class="navbar navbar-expand-lg bg-body border-bottom sticky-top">
+    <div class="container py-2">
+      <a class="navbar-brand fw-semibold" href="/">Meteo Station</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegación">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="mainNav">
+        <div class="navbar-nav ms-auto gap-lg-2">
+          <a class="nav-link" href="/">Dashboard</a>
+          <a class="nav-link active" href="/settings.html">Configuración</a>
+          <a class="nav-link" href="/outbox.html">Outbox</a>
+          <a class="nav-link" href="/exports.html">Exports</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container py-4 py-lg-5">
+    <section class="card shadow-sm mb-4">
+      <div class="card-body p-4 p-lg-5">
+      <div class="row align-items-end g-4">
+        <div class="col-lg-8">
+          <div class="text-uppercase text-secondary small fw-semibold mb-2">Ajustes del sistema</div>
+          <h1 class="display-6 fw-semibold mb-3">Configura la estación y sus salidas</h1>
+          <p class="lead text-secondary mb-0">Ajusta el intervalo de muestreo, los outputs y la programación de exports desde una interfaz sencilla.</p>
+        </div>
+        <div class="col-lg-4 text-lg-end">
+          <a class="btn btn-outline-secondary" href="/">Volver al dashboard</a>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <form class="row g-4" onsubmit="return false;">
+      <div class="col-12 col-xl-6">
+        <section class="card shadow-sm h-100">
+          <div class="card-body p-4">
+            <div class="small text-uppercase text-secondary fw-semibold mb-3">Parámetros básicos</div>
+          <div class="vstack gap-3">
+            <div>
+              <label for="stationId" class="form-label">Station ID</label>
+              <input id="stationId" type="text" class="form-control form-control-lg">
+            </div>
+            <div>
+              <label for="interval" class="form-label">Intervalo de muestreo (segundos)</label>
+              <input id="interval" type="number" min="1" max="3600" class="form-control form-control-lg">
+            </div>
+              <div class="form-check form-switch pt-2">
+                <input id="collectorEnabled" class="form-check-input" type="checkbox" role="switch">
+                <label class="form-check-label fw-semibold" for="collectorEnabled">Collector activo</label>
+                <div class="form-text">Si lo apagas, la Raspberry sigue encendida pero deja de registrar mediciones.</div>
+              </div>
+          </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <section class="card shadow-sm h-100">
+          <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <div class="small text-uppercase text-secondary fw-semibold mb-2">Zona horaria UI</div>
+              <div class="small text-secondary mb-0">Se usa para mostrar las horas en la interfaz y para calcular el preview de exports.</div>
+            </div>
+          </div>
+          <select id="uiTimezone" class="form-select form-select-lg w-auto">
+            <option value="UTC">UTC (0)</option>
+            <option value="Europe/Madrid">Europe/Madrid (España)</option>
+            <option value="America/New_York">America/New_York (US ET)</option>
+            <option value="Asia/Shanghai">Asia/Shanghai (China)</option>
+          </select>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <section class="card shadow-sm h-100">
+          <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <div class="small text-uppercase text-secondary fw-semibold mb-2">Webhook</div>
+              <div class="small text-secondary mb-0">Envía cada medición a una URL externa vía HTTP POST JSON.</div>
+            </div>
+            <div class="form-check form-switch mt-1">
+              <input id="whEnabled" class="form-check-input" type="checkbox" role="switch">
+              <label class="form-check-label small" for="whEnabled">Activo</label>
+            </div>
+          </div>
+          <div class="vstack gap-3">
+            <div>
+              <label for="whUrl" class="form-label">URL destino</label>
+              <input id="whUrl" type="text" placeholder="http://127.0.0.1:9000/wh" class="form-control">
+            </div>
+            <div>
+              <label for="whTimeout" class="form-label">Timeout (segundos)</label>
+              <input id="whTimeout" type="number" min="1" max="60" class="form-control w-auto">
+            </div>
+          </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 col-xl-6">
+        <section class="card shadow-sm h-100">
+          <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <div class="small text-uppercase text-secondary fw-semibold mb-2">MQTT</div>
+              <div class="small text-secondary mb-0">Publica el JSON de la estación en un topic configurable.</div>
+            </div>
+            <div class="form-check form-switch mt-1">
+              <input id="mqEnabled" class="form-check-input" type="checkbox" role="switch">
+              <label class="form-check-label small" for="mqEnabled">Activo</label>
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-8">
+              <label for="mqHost" class="form-label">Host</label>
+              <input id="mqHost" type="text" placeholder="localhost" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label for="mqPort" class="form-label">Puerto</label>
+              <input id="mqPort" type="number" min="1" max="65535" class="form-control">
+            </div>
+            <div class="col-12">
+              <label for="mqTopic" class="form-label">Topic</label>
+              <input id="mqTopic" type="text" placeholder="meteo/measurements" class="form-control">
+            </div>
+          </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12">
+        <section class="card shadow-sm">
+          <div class="card-body p-4">
+          <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+            <div>
+              <div class="small text-uppercase text-secondary fw-semibold mb-2">Auto-export CSV</div>
+              <div class="small text-secondary mb-0">Programa la generación de exports y conserva el histórico con una retención controlada.</div>
+            </div>
+            <div class="form-check form-switch mt-1">
+              <input id="exEnabled" class="form-check-input" type="checkbox" role="switch">
+              <label class="form-check-label small" for="exEnabled">Activo</label>
+            </div>
+          </div>
+
+          <div class="row g-3 align-items-end">
+            <div class="col-md-4 col-lg-3">
+              <label for="exLocalTime" class="form-label">Hora local</label>
+              <input id="exLocalTime" type="time" class="form-control">
+            </div>
+            <div class="col-md-4 col-lg-3">
+              <label for="exFrequency" class="form-label">Frecuencia</label>
+              <select id="exFrequency" class="form-select">
+                <option value="daily">Diario</option>
+                <option value="weekly">Semanal</option>
+                <option value="every_n_days">Cada N días</option>
+              </select>
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <label for="exEveryDays" class="form-label">Cada N días</label>
+              <input id="exEveryDays" type="number" min="2" max="365" class="form-control">
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <label for="exKeepDays" class="form-label">Retención (días)</label>
+              <input id="exKeepDays" type="number" min="1" max="3650" class="form-control">
+            </div>
+            <div class="col-md-4 col-lg-2">
+              <div class="border rounded p-3 bg-body-tertiary">
+                <div class="small text-secondary mb-1">UTC calculado</div>
+                <div class="h5 mb-0"><span id="exUtcPreview">--:--</span></div>
+              </div>
+            </div>
+          </div>
+
+          <input id="exTimeUtc" type="hidden" value="00:00" />
+
+          <div class="mt-3 small text-secondary">
+            Los ficheros se guardan en <strong>data/exports/</strong>. Puedes consultar los backups desde la vista de <a href="/exports.html">exports</a>.
+          </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="col-12 d-flex flex-wrap align-items-center gap-3">
+        <button id="saveBtn" type="button" class="btn btn-primary btn-lg px-4">Guardar cambios</button>
+        <div id="msg" class="small text-secondary">—</div>
+      </div>
+    </form>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1N7N6jIeHz" crossorigin="anonymous"></script>
+  <script src="/settings.js"></script>
+</body>
+</html>

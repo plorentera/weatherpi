@@ -1,0 +1,32 @@
+:root {
+  --dot-size: 0.75rem;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.dot {
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: 999px;
+  background: #6c757d;
+  display: inline-block;
+}
+
+.pre {
+  font-size: 0.875rem;
+  max-height: 28rem;
+  overflow: auto;
+}
+
+.value {
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+  font-weight: 600;
+}
+
+.unit {
+  font-size: 1rem;
+  color: var(--bs-secondary-color);
+}
