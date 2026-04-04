@@ -1,9 +1,10 @@
 import time
 from html import escape
 from pathlib import Path
+from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, PlainTextResponse, JSONResponse
 
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -11,6 +12,7 @@ from pydantic import BaseModel, Field
 from common.db import (
     get_connection,
     fetch_latest,
+    fetch_measurements_series,
     get_config,
     set_config,
     outbox_summary,
@@ -27,9 +29,9 @@ app = FastAPI(
         "de la estacion meteorologica."
     ),
     version="1.0.0",
-    docs_url=None,
-    openapi_url=None,
-    redoc_url=None,
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+    redoc_url="/redoc",
 )
 static_dir = Path(__file__).resolve().parent / "static"
 docs_dir = Path(__file__).resolve().parent.parent / "docs"
@@ -61,6 +63,12 @@ def latest():
     return {"data": fetch_latest()}
 
 
+@app.get("/api/series")
+def series(limit: int = 288):
+    limit = max(10, min(limit, 2000))
+    return {"items": fetch_measurements_series(limit=limit)}
+
+
 class ConfigModel(BaseModel):
     station_id: str = "meteo-001"
     sample_interval_seconds: int = 5
@@ -68,6 +76,46 @@ class ConfigModel(BaseModel):
     outputs: Dict[str, Any] = Field(default_factory=dict)
     exports: Dict[str, Any] = Field(default_factory=dict)
     ui: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _is_valid_http_url(value: str) -> bool:
+    try:
+        p = urlparse(value)
+        return p.scheme in ("http", "https") and bool(p.netloc)
+    except Exception:
+        return False
+
+
+def _validate_config_payload(cfg: ConfigModel) -> Optional[str]:
+    if cfg.sample_interval_seconds < 1 or cfg.sample_interval_seconds > 3600:
+        return "sample_interval_seconds debe estar entre 1 y 3600"
+
+    outputs = cfg.outputs if isinstance(cfg.outputs, dict) else {}
+
+    wh = outputs.get("webhook", {}) if isinstance(outputs.get("webhook", {}), dict) else {}
+    if bool(wh.get("enabled", False)):
+        wh_url = str(wh.get("url", "")).strip()
+        if not wh_url:
+            return "outputs.webhook.url es obligatorio cuando webhook.enabled=true"
+        if not _is_valid_http_url(wh_url):
+            return "outputs.webhook.url debe empezar por http:// o https:// y ser una URL valida"
+
+    mqtt = outputs.get("mqtt", {}) if isinstance(outputs.get("mqtt", {}), dict) else {}
+    if bool(mqtt.get("enabled", False)):
+        host = str(mqtt.get("host", "")).strip()
+        topic = str(mqtt.get("topic", "")).strip()
+        try:
+            port = int(mqtt.get("port", 1883))
+        except Exception:
+            return "outputs.mqtt.port debe ser numerico"
+        if not host:
+            return "outputs.mqtt.host es obligatorio cuando mqtt.enabled=true"
+        if not topic:
+            return "outputs.mqtt.topic es obligatorio cuando mqtt.enabled=true"
+        if port < 1 or port > 65535:
+            return "outputs.mqtt.port debe estar entre 1 y 65535"
+
+    return None
 
 
 
@@ -78,8 +126,9 @@ def read_config():
 
 @app.put("/api/config")
 def update_config(cfg: ConfigModel):
-    if cfg.sample_interval_seconds < 1 or cfg.sample_interval_seconds > 3600:
-        return {"ok": False, "error": "sample_interval_seconds debe estar entre 1 y 3600"}
+    error = _validate_config_payload(cfg)
+    if error:
+        return JSONResponse(status_code=400, content={"ok": False, "error": error})
 
     set_config(cfg.model_dump())
     return {"ok": True, "config": get_config()}
@@ -87,6 +136,7 @@ def update_config(cfg: ConfigModel):
 
 @app.get("/api/outbox")
 def api_outbox(status: Optional[str] = None, limit: int = 100):
+    limit = max(1, min(limit, 500))
     return {
         "summary": outbox_summary(),
         "items": fetch_outbox(status=status, limit=limit),
@@ -137,6 +187,7 @@ def export_csv(days: int = 7):
 
 @app.get("/api/exports")
 def exports_list(limit: int = 50):
+    limit = max(1, min(limit, 500))
     return {"items": list_exports(limit=limit)}
 
 
@@ -163,14 +214,14 @@ def api_markdown_doc(raw: bool = False):
     if raw:
         return PlainTextResponse(content=doc_path.read_text(encoding="utf-8"), media_type="text/markdown")
 
-        content = doc_path.read_text(encoding="utf-8")
-        html = f"""<!doctype html>
+    content = doc_path.read_text(encoding="utf-8")
+    html = f"""<!doctype html>
 <html lang="es">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>API - Meteo Station</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
     <style>
         body {{ background: #f8f9fa; }}
         .doc-shell {{ max-width: 1100px; }}
@@ -193,7 +244,7 @@ def api_markdown_doc(raw: bool = False):
 </body>
 </html>"""
 
-        return HTMLResponse(content=html)
+    return HTMLResponse(content=html)
 
 
 app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")

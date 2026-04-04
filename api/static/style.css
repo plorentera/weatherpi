@@ -30,3 +30,13 @@ body {
   font-size: 1rem;
   color: var(--bs-secondary-color);
 }
+
+.chart-wrap {
+  position: relative;
+  min-height: 17rem;
+}
+
+#historyChart {
+  width: 100%;
+  max-height: 20rem;
+}

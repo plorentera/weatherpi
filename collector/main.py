@@ -24,6 +24,7 @@ def main() -> None:
     retention_seconds = 7 * 24 * 3600
     cleanup_every_seconds = 3600
     last_cleanup = 0
+    last_webhook_warn_ts = 0
 
     while True:
         now_ts = int(time.time())
@@ -68,8 +69,13 @@ def main() -> None:
             }
 
             wh = outputs.get("webhook", {})
-            if wh.get("enabled") and wh.get("url"):
+            wh_url = str(wh.get("url", "")).strip()
+            if wh.get("enabled") and wh_url.startswith(("http://", "https://")):
                 enqueue_outbox("webhook", payload, now_ts)
+            elif wh.get("enabled") and wh_url:
+                if now_ts - last_webhook_warn_ts >= 60:
+                    print("[collector] WARN: webhook enabled but URL must start with http:// or https://")
+                    last_webhook_warn_ts = now_ts
 
             mq = outputs.get("mqtt", {})
             if mq.get("enabled") and mq.get("host") and mq.get("topic"):

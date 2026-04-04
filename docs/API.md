@@ -203,9 +203,11 @@ Respuesta 200:
 
 Actualiza configuracion.
 
-Regla de validacion de API:
+Reglas de validacion de API:
 
 - `sample_interval_seconds` debe estar entre `1` y `3600`.
+- Si `outputs.webhook.enabled=true`, `outputs.webhook.url` debe ser URL HTTP(S) valida.
+- Si `outputs.mqtt.enabled=true`, `host` y `topic` son obligatorios y `port` debe estar entre `1` y `65535`.
 
 #### Ejemplo
 
@@ -239,7 +241,7 @@ curl -X PUT http://127.0.0.1:8000/api/config \
 }
 ```
 
-#### Respuesta 200 (error funcional)
+#### Respuesta 400 (error de validacion)
 
 ```json
 {
@@ -247,8 +249,6 @@ curl -X PUT http://127.0.0.1:8000/api/config \
   "error": "sample_interval_seconds debe estar entre 1 y 3600"
 }
 ```
-
-Nota: aunque el endpoint responde 200 en este error funcional, debes validar `ok` en cliente.
 
 ## 4) Outbox
 

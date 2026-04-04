@@ -166,6 +166,27 @@ def fetch_latest() -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def fetch_measurements_series(limit: int = 288) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT ts, temp_c, humidity_pct, pressure_hpa
+        FROM measurements
+        ORDER BY ts DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+    rows = cur.fetchall()
+    conn.close()
+
+    # Return ascending order for chart timelines.
+    return [dict(r) for r in reversed(rows)]
+
+
 def _normalize_exports_schedule(schedule: Any) -> Dict[str, Any]:
     """
     Normaliza schedule para el modelo UTC-only:

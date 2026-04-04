@@ -42,11 +42,13 @@ python -m scripts.run_all
 http://127.0.0.1:8000
 ```
 
+Si el puerto `8000` esta ocupado, el launcher elegira automaticamente el siguiente puerto libre y lo mostrara por consola.
+
 ## Raspberry
 
 - El panel permite pausar o reanudar el collector con el switch de configuración.
 - Para despliegue real, lo más limpio es ejecutar `python -m scripts.run_all` como servicio `systemd`.
-- Si necesitas envíos HTTP/MQTT, puedes arrancar `python -m collector.outputs_worker` aparte.
+- El launcher principal ya arranca API, collector, outputs y backup.
 
 ## Procesos individuales
 

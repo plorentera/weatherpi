@@ -3,7 +3,7 @@ import time
 import httpx
 import paho.mqtt.client as mqtt
 
-from common.db import get_config, fetch_due_outbox, mark_outbox_sent, mark_outbox_failed, purge_sent_outbox
+from common.db import get_config, fetch_due_outbox, mark_outbox_sent, mark_outbox_failed, purge_sent_outbox, MAX_ATTEMPTS
 
 
 def send_webhook(url: str, timeout_s: int, payload: dict) -> None:
@@ -26,6 +26,7 @@ def main() -> None:
     print("[outputs] worker started")
 
     last_purge = 0
+    last_invalid_warning_ts = 0
     PURGE_EVERY_SECONDS = 600  
     KEEP_LAST_SENT = 2000
 
@@ -45,6 +46,7 @@ def main() -> None:
 
         cfg = get_config()
         outputs = cfg.get("outputs", {})
+        invalid_webhook_seen = False
 
         for item in items:
             outbox_id = item["id"]
@@ -65,6 +67,10 @@ def main() -> None:
                     url = str(wh.get("url", "")).strip()
                     if not url:
                         raise RuntimeError("Webhook URL is empty")
+                    if not url.startswith(("http://", "https://")):
+                        mark_outbox_failed(outbox_id, MAX_ATTEMPTS, "Webhook URL must start with http:// or https://", now_ts)
+                        invalid_webhook_seen = True
+                        continue
 
                     send_webhook(
                         url=url,
@@ -98,6 +104,10 @@ def main() -> None:
             except Exception as e:
                 mark_outbox_failed(outbox_id, attempts, str(e), now_ts)
                 print(f"[outputs] FAIL id={outbox_id} dest={destination} err={e}")
+
+        if invalid_webhook_seen and (now_ts - last_invalid_warning_ts >= 60):
+            print("[outputs] WARN: invalid webhook URL config (requires http:// or https://); affected items marked as failed")
+            last_invalid_warning_ts = now_ts
 
         time.sleep(0.5)
 

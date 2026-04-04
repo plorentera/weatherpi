@@ -29,10 +29,10 @@ let userTouchedUiTz = false;
 
 /* =========================================================
    PREVIEW UTC: exports heredan SIEMPRE la TZ de la UI
-  msg("Guardando…");
+   ========================================================= */
 function zonedDateForToday(tz, hh, mm) {
   const now = new Date();
-    .catch(e => msg("❌ Error guardando: " + e.message))
+
   // "guess" en UTC (hoy) a la hora hh:mm, luego corregimos según cómo lo ve esa TZ
   const guess = new Date(Date.UTC(
     now.getUTCFullYear(),
@@ -196,11 +196,18 @@ async function saveConfig() {
     body: JSON.stringify(payload),
   });
 
-  const data = await res.json();
-  if (data.ok) {
+  let data = {};
+  try {
+    data = await res.json();
+  } catch (_) {
+    data = {};
+  }
+
+  if (res.ok && data.ok) {
     msg("✅ Configuración guardada correctamente.");
   } else {
-    msg("❌ Error: " + (data.error || "desconocido"));
+    const err = data.error || data.detail || `HTTP ${res.status}`;
+    msg("❌ Error: " + err);
   }
 }
 
