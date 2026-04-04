@@ -1,8 +1,9 @@
 import time
+from html import escape
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, PlainTextResponse
 
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -19,8 +20,19 @@ from common.db import (
     list_exports,
 )
 
-app = FastAPI(title="Meteo Station")
+app = FastAPI(
+    title="Meteo Station API",
+    description=(
+        "API HTTP para monitorizacion, configuracion, outbox y exportacion de datos "
+        "de la estacion meteorologica."
+    ),
+    version="1.0.0",
+    docs_url=None,
+    openapi_url=None,
+    redoc_url=None,
+)
 static_dir = Path(__file__).resolve().parent / "static"
+docs_dir = Path(__file__).resolve().parent.parent / "docs"
 
 
 @app.get("/api/status")
@@ -140,6 +152,48 @@ def download_export(export_id: int):
         raise HTTPException(status_code=404, detail="export file missing")
 
     return FileResponse(path=export_path, filename=match["filename"], media_type="text/csv")
+
+
+@app.get("/docs/API.md", include_in_schema=False)
+def api_markdown_doc(raw: bool = False):
+    doc_path = docs_dir / "API.md"
+    if not doc_path.exists():
+        raise HTTPException(status_code=404, detail="API documentation not found")
+
+    if raw:
+        return PlainTextResponse(content=doc_path.read_text(encoding="utf-8"), media_type="text/markdown")
+
+        content = doc_path.read_text(encoding="utf-8")
+        html = f"""<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>API - Meteo Station</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        body {{ background: #f8f9fa; }}
+        .doc-shell {{ max-width: 1100px; }}
+        .doc-body {{ white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }}
+    </style>
+</head>
+<body>
+    <main class="container doc-shell py-4 py-lg-5">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+            <div>
+                <div class="text-uppercase text-secondary small fw-semibold mb-2">Documentacion consultable</div>
+                <h1 class="h3 fw-semibold mb-0">docs/API.md</h1>
+            </div>
+            <a class="btn btn-outline-secondary" href="/docs/API.md?raw=1" target="_blank" rel="noreferrer">Abrir raw</a>
+        </div>
+        <section class="card shadow-sm">
+            <div class="card-body p-4 p-lg-5 doc-body">{escape(content)}</div>
+        </section>
+    </main>
+</body>
+</html>"""
+
+        return HTMLResponse(content=html)
 
 
 app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
