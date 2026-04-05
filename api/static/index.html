@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="Panel de monitorización de la estación meteorológica" />
+  <meta name="description" content="Panel local de Meteo Station" />
   <title>Meteo Station</title>
   <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/style.css" />
@@ -12,13 +12,13 @@
   <nav class="navbar navbar-expand-lg bg-body border-bottom sticky-top">
     <div class="container py-2">
       <a class="navbar-brand fw-semibold" href="/">Meteo Station</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegación">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegacion">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="mainNav">
         <div class="navbar-nav ms-auto gap-lg-2">
           <a class="nav-link active" href="/">Dashboard</a>
-          <a class="nav-link" href="/settings.html">Configuración</a>
+          <a class="nav-link" href="/settings.html">Configuracion</a>
           <a class="nav-link" href="/outbox.html">Outbox</a>
           <a class="nav-link" href="/exports.html">Exports</a>
           <a class="nav-link" href="/api.html">API</a>
@@ -30,47 +30,88 @@
   <main class="container py-4 py-lg-5">
     <section class="card shadow-sm mb-4">
       <div class="card-body p-4 p-lg-5">
-      <div class="row align-items-end g-4">
-        <div class="col-lg-8">
-          <div class="text-uppercase text-secondary small fw-semibold mb-2">Monitorización en tiempo real</div>
-          <h1 class="display-6 fw-semibold mb-3">Panel de la estación meteorológica</h1>
-          <p class="lead text-secondary mb-0">Consulta la última medición, descarga datos históricos y administra salidas desde una interfaz sencilla y estable.</p>
-        </div>
-        <div class="col-lg-4 text-lg-end">
-          <div class="d-inline-flex align-items-center gap-2 px-3 py-2 border rounded-pill bg-body">
-            <span id="statusDot" class="dot"></span>
-            <span id="statusText">conectando…</span>
+        <div class="row g-4 align-items-center">
+          <div class="col-lg-8">
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Estacion local</div>
+            <h1 class="display-6 fw-semibold mb-3">Estado general de Meteo Station</h1>
+            <p class="lead text-secondary mb-0">
+              Consulta las mediciones actuales, el estado de envio y la salud basica del sistema desde una sola pantalla.
+            </p>
+          </div>
+          <div class="col-lg-4 text-lg-end">
+            <div class="d-inline-flex align-items-center gap-2 px-3 py-2 border rounded-pill bg-body">
+              <span id="statusDot" class="dot"></span>
+              <span id="statusText">conectando...</span>
+            </div>
           </div>
         </div>
-      </div>
       </div>
     </section>
 
-    <section class="row g-3 g-lg-4 mb-4">
+    <section class="row g-3 mb-4">
       <div class="col-md-4">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-          <div class="small text-uppercase text-secondary fw-semibold mb-2">Temperatura</div>
-          <div class="value"><span id="temp">--</span> <span class="unit">°C</span></div>
-          <div class="small text-secondary mb-0">Última lectura registrada</div>
+            <div class="small text-uppercase text-secondary fw-semibold mb-2">Temperatura</div>
+            <div class="value"><span id="temp">--</span> <span class="unit">°C</span></div>
+            <div class="small text-secondary">Ultima lectura registrada</div>
           </div>
         </div>
       </div>
       <div class="col-md-4">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-          <div class="small text-uppercase text-secondary fw-semibold mb-2">Humedad</div>
-          <div class="value"><span id="hum">--</span> <span class="unit">%</span></div>
-          <div class="small text-secondary mb-0">Nivel ambiental actual</div>
+            <div class="small text-uppercase text-secondary fw-semibold mb-2">Humedad</div>
+            <div class="value"><span id="hum">--</span> <span class="unit">%</span></div>
+            <div class="small text-secondary">Nivel ambiental actual</div>
           </div>
         </div>
       </div>
       <div class="col-md-4">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-          <div class="small text-uppercase text-secondary fw-semibold mb-2">Presión</div>
-          <div class="value"><span id="pres">--</span> <span class="unit">hPa</span></div>
-          <div class="small text-secondary mb-0">Referencia barométrica</div>
+            <div class="small text-uppercase text-secondary fw-semibold mb-2">Presion</div>
+            <div class="value"><span id="pres">--</span> <span class="unit">hPa</span></div>
+            <div class="small text-secondary">Referencia barometrica</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row g-3 mb-4">
+      <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="small text-secondary">Acceso</div>
+            <div class="fw-semibold" id="accessMode">-</div>
+            <div class="small text-secondary" id="accessOrigin">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="small text-secondary">Outbox pendiente</div>
+            <div class="fw-semibold" id="queuePending">-</div>
+            <div class="small text-secondary" id="queueFailed">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="small text-secondary">Updates</div>
+            <div class="fw-semibold" id="updateState">-</div>
+            <div class="small text-secondary" id="updateVersion">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-sm-6 col-xl-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="small text-secondary">Seguridad</div>
+            <div class="fw-semibold" id="securityState">-</div>
+            <div class="small text-secondary" id="securityHint">-</div>
           </div>
         </div>
       </div>
@@ -80,12 +121,8 @@
       <div class="col-12">
         <div class="card shadow-sm">
           <div class="card-body p-4">
-            <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
-              <div>
-                <div class="small text-uppercase text-secondary fw-semibold mb-1">Tendencia reciente</div>
-                <div class="small text-secondary mb-0">Ultimas 24h (temperatura, humedad y presion)</div>
-              </div>
-            </div>
+            <div class="small text-uppercase text-secondary fw-semibold mb-1">Tendencia reciente</div>
+            <div class="small text-secondary mb-3">Ultimas 24 horas de temperatura, humedad y presion.</div>
             <div class="chart-wrap">
               <canvas id="historyChart" height="120"></canvas>
             </div>
@@ -96,14 +133,14 @@
       <div class="col-lg-8">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-          <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
-            <div>
-              <div class="small text-uppercase text-secondary fw-semibold mb-1">Última lectura</div>
-              <div class="small text-secondary mb-0"><span id="lastTs">--</span></div>
+            <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+              <div>
+                <div class="small text-uppercase text-secondary fw-semibold mb-1">Ultima lectura</div>
+                <div class="small text-secondary"><span id="lastTs">--</span></div>
+              </div>
+              <a class="btn btn-outline-secondary btn-sm" href="/api/latest" target="_blank" rel="noreferrer">Ver JSON</a>
             </div>
-            <a class="btn btn-outline-secondary btn-sm" href="/api/latest" target="_blank" rel="noreferrer">Ver JSON</a>
-          </div>
-          <pre id="raw" class="pre mb-0">--</pre>
+            <pre id="raw" class="pre mb-0">--</pre>
           </div>
         </div>
       </div>
@@ -111,18 +148,20 @@
       <div class="col-lg-4">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-          <div class="small text-uppercase text-secondary fw-semibold mb-3">Acciones rápidas</div>
-          <div class="d-grid gap-2">
-            <a class="btn btn-primary" href="/api/export.csv?days=7">Descargar CSV (7 días)</a>
-            <a class="btn btn-outline-secondary" href="/api/status" target="_blank" rel="noreferrer">Estado API</a>
-            <a class="btn btn-outline-secondary" href="/settings.html">Abrir configuración</a>
+            <div class="small text-uppercase text-secondary fw-semibold mb-3">Acciones principales</div>
+            <div class="d-grid gap-2">
+              <a class="btn btn-primary" href="/settings.html">Abrir configuracion</a>
+              <a class="btn btn-outline-secondary" href="/outbox.html">Ver outbox</a>
+              <a class="btn btn-outline-secondary" href="/exports.html">Ver exports</a>
+              <a class="btn btn-outline-secondary" href="/api/export.csv?days=7">Descargar CSV (7 dias)</a>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <footer class="d-flex flex-wrap justify-content-between align-items-center gap-2 py-3 text-secondary small">
-      <span>API y panel de control de Meteo Station</span>
+    <footer class="py-3 text-secondary small">
+      Panel local de Meteo Station
     </footer>
   </main>
 

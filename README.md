@@ -6,18 +6,20 @@ Estado actual: **WIP (work in progress)**. El sistema es funcional para uso loca
 
 ## Objetivo
 
-Recoger mediciones ambientales, visualizarlas en un dashboard web, y gestionar salidas (webhook/MQTT) y exportaciones CSV historicas.
+Recoger mediciones ambientales, visualizarlas en un dashboard web local, y gestionar telemetria saliente, configuracion remota pull y exportaciones CSV historicas sin exponer la estacion a Internet.
 
 ## Alcance actual
 
 ### Incluido hoy
 
-- API HTTP con FastAPI para estado, lectura, configuracion, outbox y exportaciones.
+- API HTTP con FastAPI para estado, lectura, configuracion efectiva, outbox, workers, remote-config y updates.
 - Dashboard web con metricas actuales y grafico historico (Chart.js local).
 - Worker de recoleccion con almacenamiento en SQLite.
-- Worker de salidas con cola de reintentos (outbox).
+- Worker de entrega saliente con cola persistente, idempotencia, reintentos y backoff.
+- Worker de remote-config pull con overlay controlado.
+- Worker de updates pull con descarga/verificacion de bundles.
 - Worker de backup/export CSV por programacion.
-- UI de configuracion para collector, outputs y exports.
+- UI de configuracion para collector, telemetria, remote-config, updates, security y secret store.
 - Librerias frontend servidas en local (sin dependencia de CDN).
 - Cache local de dependencias Python en `third_party/python-wheels`.
 
@@ -30,25 +32,29 @@ Recoger mediciones ambientales, visualizarlas en un dashboard web, y gestionar s
 
 ## Arquitectura
 
-El sistema se compone de 4 procesos principales:
+El sistema se compone de 6 procesos principales:
 
 1. API (`api/main.py`)
 2. Collector (`collector/main.py`)
-3. Outputs worker (`collector/outputs_worker.py`)
-4. Backup worker (`collector/backup_worker.py`)
+3. Delivery worker (`collector/delivery_worker.py`)
+4. Remote config worker (`collector/remote_config_worker.py`)
+5. Update worker (`collector/update_worker.py`)
+6. Backup worker (`collector/backup_worker.py`)
 
 Persistencia principal:
 
 - SQLite en `data/meteo.db`
-- Tablas: `measurements`, `settings`, `outbox`, `exports`
+- Tablas: `measurements`, `settings`, `outbox`, `exports`, `worker_heartbeats`, `remote_config_state`, `update_state`, `release_history`
 
 Flujo de datos resumido:
 
 1. Collector lee sensor y escribe en `measurements`.
-2. Si hay outputs habilitados, encola mensajes en `outbox`.
-3. Outputs worker consume `outbox`, envia y reintenta con backoff.
-4. Backup worker genera CSV y registra metadatos en `exports`.
-5. Dashboard consulta API para estado, ultima lectura y serie temporal.
+2. Si hay destinos de telemetria habilitados, encola envelopes normalizados en `outbox`.
+3. Delivery worker consume `outbox`, entrega por webhook/MQTT y reintenta con backoff.
+4. Remote config worker consulta manifests remotos y aplica overlays permitidos.
+5. Update worker consulta releases, descarga bundles y los deja staged/verificados.
+6. Backup worker genera CSV y registra metadatos en `exports`.
+7. Dashboard consulta API para estado, ultima lectura, serie temporal y workers.
 
 ## Requisitos
 
@@ -101,7 +107,7 @@ python -m scripts.init_db
 python -m scripts.run_all
 ```
 
-Este launcher arranca API + collector + outputs + backup.
+Este launcher arranca API + collector + delivery + remote_config + update + backup.
 
 Notas:
 
@@ -111,9 +117,11 @@ Notas:
 ### Ejecucion por procesos individuales
 
 ```powershell
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 python -m collector.main
-python -m collector.outputs_worker
+python -m collector.delivery_worker
+python -m collector.remote_config_worker
+python -m collector.update_worker
 python -m collector.backup_worker
 ```
 
@@ -194,9 +202,20 @@ API util:
 - `GET /api/series?limit=288`
 - `GET /api/config`
 - `PUT /api/config`
+- `GET /api/config/secrets`
+- `PUT /api/config/secrets`
 - `GET /api/outbox`
 - `POST /api/outbox/retry_failed`
 - `POST /api/outbox/purge_sent`
+- `GET /api/system/version`
+- `GET /api/system/workers`
+- `GET /api/telemetry/status`
+- `GET /api/remote-config/status`
+- `POST /api/remote-config/check-now`
+- `GET /api/update/status`
+- `POST /api/update/check-now`
+- `POST /api/update/apply`
+- `POST /api/update/rollback`
 - `GET /api/export.csv?days=7`
 - `GET /api/exports`
 - `GET /api/exports/{id}`
@@ -209,22 +228,28 @@ Documentacion:
 
 ## Configuracion
 
-Se guarda en `settings.key = 'config'` (JSON), mergeada con defaults.
+La configuracion no sensible se guarda en `settings.key = 'config'` (JSON) y el overlay remoto aplicado en `settings.key = 'remote_config_overlay'`.
+
+La configuracion sensible se guarda aparte en `data/device_secrets.json`.
 
 Campos principales:
 
 - `station_id`
 - `sample_interval_seconds` (1..3600)
 - `collector.enabled`
-- `outputs.webhook.*`
-- `outputs.mqtt.*`
+- `telemetry.destinations[]`
+- `remote_config.*`
+- `updates.*`
+- `security.*`
 - `exports.*`
 - `ui.timezone`
 
 Validaciones relevantes (`PUT /api/config`):
 
-- Webhook habilitado requiere URL HTTP(S) valida.
-- MQTT habilitado requiere `host`, `topic` y `port` en rango 1..65535.
+- IDs unicos en `telemetry.destinations`.
+- Destinos webhook activos requieren URL `https://` o `http://` loopback.
+- Destinos MQTT activos requieren `host`, `topic` y `port` valido.
+- `remote_config.endpoint` y `updates.manifest_url` deben ser `https://` o loopback si estan activos.
 
 ## Librerias en local
 
@@ -246,9 +271,9 @@ Dependencias Python cacheadas:
 
 ## Operacion recomendada (Raspberry/Linux)
 
-- Ejecutar `python -m scripts.run_all` como servicio `systemd`.
+- Ejecutar `python -m scripts.run_all` o `python -m scripts.release_launcher supervise -- python -m scripts.run_all` como servicio `systemd`.
 - Definir politica de backup de `data/`.
-- Revisar periodicamente outbox (`/outbox.html`) y exports (`/exports.html`).
+- Revisar periodicamente outbox (`/outbox.html`), workers (`GET /api/system/workers`) y exports (`/exports.html`).
 
 ## Roadmap propuesto
 

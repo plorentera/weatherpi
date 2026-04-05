@@ -1,6 +1,6 @@
 # API - Meteo Station
 
-Documento completo de la API HTTP de la estacion meteorologica.
+Documento de referencia de la API HTTP local-first de la estación meteorológica.
 
 ## Base URL
 
@@ -8,27 +8,18 @@ Documento completo de la API HTTP de la estacion meteorologica.
 http://127.0.0.1:8000
 ```
 
-## Documentacion interactiva
-
-- Swagger UI: `/docs`
-- OpenAPI JSON: `/openapi.json`
-
 ## Convenciones
 
-- Todo el webserver y toda la API requieren autenticacion.
-- En navegador, el acceso recomendado es mediante `GET /login` (sesion por cookie).
-- Para integraciones, puedes usar HTTP Basic (`Authorization: Basic ...`).
-- Para contrasenas, se admite modo plano o hash PBKDF2 por variable de entorno.
-- Roles soportados:
-  - `reader`: acceso de solo lectura (`GET`, `HEAD`, `OPTIONS`).
-  - `admin`: acceso completo (lectura + escritura).
-- Cualquier peticion sin credenciales validas devuelve `401` con `WWW-Authenticate: Basic`.
-- Cualquier peticion de escritura con rol `reader` devuelve `403` (`admin role required`).
-- Respuestas de negocio en JSON (`application/json`).
-- Endpoints de export devuelven CSV (`text/csv`).
-- Timestamps en formato epoch (segundos UTC).
+- Toda la UI y toda la API requieren autenticación.
+- En navegador, el acceso recomendado es `GET /login` para crear sesión por cookie.
+- Para scripts, se mantiene HTTP Basic.
+- Roles:
+  - `reader`: solo lectura.
+  - `admin`: lectura y escritura.
+- Toda integración remota se hace por conexiones salientes iniciadas por la estación.
+- La configuración sensible no se devuelve en claro: se gestiona por secret store y la API solo muestra un resumen enmascarado.
 
-Variables de entorno de seguridad:
+## Variables de entorno de seguridad
 
 - `WEATHERPI_READER_USER`, `WEATHERPI_READER_PASS`, `WEATHERPI_READER_PASS_HASH`
 - `WEATHERPI_ADMIN_USER`, `WEATHERPI_ADMIN_PASS`, `WEATHERPI_ADMIN_PASS_HASH`
@@ -36,206 +27,144 @@ Variables de entorno de seguridad:
 - `WEATHERPI_COOKIE_SECURE`
 - `WEATHERPI_COOKIE_SAMESITE`
 - `WEATHERPI_SESSION_TTL_SECONDS`
+- `WEATHERPI_DATA_DIR` para forzar un directorio persistente compartido entre releases
 
-Formato de hash admitido (`*_PASS_HASH`):
+## Índice rápido
 
-`pbkdf2_sha256$<iteraciones>$<salt_base64url>$<digest_base64url>`
-
-## Indice rapido
-
-| Metodo | Ruta | Descripcion |
+| Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/login` | Pantalla de acceso web |
-| POST | `/login` | Inicio de sesion (cookie) |
-| POST | `/logout` | Cierre de sesion |
-| GET | `/api/status` | Estado del servicio y recuento de lecturas |
-| GET | `/api/latest` | Ultima medicion registrada |
-| GET | `/api/config` | Lee configuracion actual |
-| PUT | `/api/config` | Actualiza configuracion |
-| GET | `/api/outbox` | Lista/filtra cola de envios |
-| POST | `/api/outbox/retry_failed` | Reencola items fallidos |
+| GET | `/login` | Pantalla de acceso |
+| POST | `/login` | Inicio de sesión |
+| POST | `/logout` | Cierre de sesión |
+| GET | `/api/status` | Estado base de la estación |
+| GET | `/api/latest` | Última medición registrada |
+| GET | `/api/series` | Serie temporal de mediciones |
+| GET | `/api/config` | Config efectiva + local + overlay remoto + summary de secrets |
+| PUT | `/api/config` | Actualiza solo la config local |
+| GET | `/api/config/secrets` | Vista enmascarada del secret store |
+| PUT | `/api/config/secrets` | Patch de secrets sensibles |
+| GET | `/api/outbox` | Cola de entrega saliente |
+| POST | `/api/outbox/retry_failed` | Reencola fallidos |
 | POST | `/api/outbox/purge_sent` | Purga enviados antiguos |
-| GET | `/api/export.csv` | Descarga CSV de mediciones |
-| GET | `/api/exports` | Lista historico de exports |
-| GET | `/api/exports/{export_id}` | Descarga export por id |
+| GET | `/api/system/version` | Versión del sistema y estado de update |
+| GET | `/api/system/workers` | Heartbeats de workers |
+| GET | `/api/telemetry/status` | Destinos salientes + resumen de outbox |
+| GET | `/api/remote-config/status` | Estado de configuración remota |
+| POST | `/api/remote-config/check-now` | Fuerza consulta remota |
+| GET | `/api/update/status` | Estado del update y release history |
+| POST | `/api/update/check-now` | Fuerza comprobación de updates |
+| POST | `/api/update/apply` | Aplica release staged |
+| POST | `/api/update/rollback` | Hace rollback |
+| GET | `/api/export.csv` | Export CSV por rango de días |
+| GET | `/api/exports` | Historial de exports locales |
+| GET | `/api/exports/{export_id}` | Descarga un export concreto |
 
-## 1) Estado
+## Estado y métricas
 
 ### GET /api/status
 
-Devuelve estado general y metadatos de base de datos.
+Devuelve metadatos básicos de mediciones y la versión local del backend.
 
-#### Ejemplo
-
-```bash
-curl http://127.0.0.1:8000/api/status
-```
-
-#### Respuesta 200
+Respuesta ejemplo:
 
 ```json
 {
   "status": "ok",
   "records": 1280,
   "last_timestamp": 1712230000,
-  "now": 1712230012
+  "now": 1712230012,
+  "version": "1.1.0"
 }
 ```
-
-Campos:
-
-- `status`: estado logico del endpoint.
-- `records`: total de lecturas en `measurements`.
-- `last_timestamp`: ultimo `ts` almacenado (puede ser `null` sin datos).
-- `now`: tiempo actual del servidor.
-
-## 2) Ultima lectura
 
 ### GET /api/latest
 
-Devuelve la ultima medicion guardada.
+Devuelve la última medición almacenada.
 
-#### Ejemplo
+### GET /api/series?limit=288
 
-```bash
-curl http://127.0.0.1:8000/api/latest
-```
+Devuelve una serie temporal ascendente para pintar histórico en la UI.
 
-#### Respuesta 200 (con datos)
+## Configuración local, overlay remoto y secret store
 
-```json
-{
-  "data": {
-    "ts": 1712230000,
-    "temp_c": 22.4,
-    "humidity_pct": 49.1,
-    "pressure_hpa": 1013.2
-  }
-}
-```
+### GET /api/config
 
-#### Respuesta 200 (sin datos)
+Devuelve:
 
-```json
-{
-  "data": null
-}
-```
+- `config`: configuración efectiva.
+- `local_config`: configuración editable localmente.
+- `remote_overlay`: overlay remoto permitido y aplicado.
+- `sources`: metadatos de revisión y origen.
+- `secrets`: resumen enmascarado del secret store.
 
-## 3) Configuracion
-
-### Modelo de configuracion
-
-Contrato base esperado:
+Modelo local esperado, resumido:
 
 ```json
 {
   "station_id": "meteo-001",
   "sample_interval_seconds": 5,
   "collector": {
-    "enabled": true
+    "enabled": true,
+    "status_emit_interval_seconds": 60
   },
-  "outputs": {
-    "webhook": {
-      "enabled": false,
-      "url": "",
-      "timeout_seconds": 5
-    },
-    "mqtt": {
-      "enabled": false,
-      "host": "localhost",
-      "port": 1883,
-      "topic": "meteo/measurements"
-    }
+  "telemetry": {
+    "enabled": true,
+    "destinations": [
+      {
+        "id": "dest-1",
+        "enabled": true,
+        "kind": "webhook_https",
+        "data_classes": ["weather_measurement", "station_status"],
+        "schedule": {"mode": "realtime", "interval_seconds": 60},
+        "batch_max_items": 1,
+        "retry_policy": {"max_attempts": 10},
+        "auth": {"mode": "bearer", "key_id": "dest-1"},
+        "webhook": {
+          "url": "https://example.com/hook",
+          "timeout_seconds": 5
+        }
+      }
+    ]
   },
-  "exports": {
+  "remote_config": {
     "enabled": false,
-    "frequency": "daily",
-    "every_days": 2,
-    "keep_days": 30,
-    "days_per_file": 1,
-    "upload": {
-      "enabled": false,
-      "webhook_url": ""
-    },
-    "schedule": {
-      "time_local": "01:00",
-      "time_utc": "00:00"
-    }
+    "endpoint": "",
+    "poll_interval_seconds": 900,
+    "auto_apply": true,
+    "auth": {"mode": "bearer", "key_id": ""},
+    "signing": {"required": true, "algorithm": "ed25519", "public_key": ""}
   },
-  "ui": {
-    "timezone": "UTC"
-  }
-}
-```
-
-### GET /api/config
-
-Lee la configuracion activa (resultado mergeado con defaults).
-
-```bash
-curl http://127.0.0.1:8000/api/config
-```
-
-Respuesta 200:
-
-```json
-{
-  "config": {
-    "station_id": "meteo-001",
-    "sample_interval_seconds": 5,
-    "collector": {
-      "enabled": true
-    },
-    "outputs": {
-      "webhook": {
-        "enabled": false,
-        "url": "",
-        "timeout_seconds": 5
-      },
-      "mqtt": {
-        "enabled": false,
-        "host": "localhost",
-        "port": 1883,
-        "topic": "meteo/measurements"
-      }
-    },
-    "exports": {
-      "enabled": false,
-      "frequency": "daily",
-      "every_days": 2,
-      "keep_days": 30,
-      "days_per_file": 1,
-      "upload": {
-        "enabled": false,
-        "webhook_url": ""
-      },
-      "schedule": {
-        "time_local": "01:00",
-        "time_utc": "00:00"
-      }
-    },
-    "ui": {
-      "timezone": "UTC"
-    },
-    "_rev": 3
+  "updates": {
+    "enabled": false,
+    "manifest_url": "",
+    "poll_interval_seconds": 3600,
+    "channel": "stable",
+    "auto_download": true,
+    "apply_strategy": "manual",
+    "health_grace_seconds": 120
+  },
+  "security": {
+    "allow_lan": false,
+    "api_bind_host": "127.0.0.1",
+    "require_tls_for_remote": true,
+    "block_remote_when_default_local_credentials": true
   }
 }
 ```
 
 ### PUT /api/config
 
-Actualiza configuracion.
+Actualiza solo la config local. La API valida:
 
-Requiere credenciales `admin` (escritura).
+- `sample_interval_seconds` entre `1` y `3600`.
+- IDs únicos en `telemetry.destinations`.
+- `kind` soportado: `webhook_https` o `mqtt`.
+- Si un destino webhook está activo, la URL debe ser `https://` o `http://` loopback.
+- Si un destino MQTT está activo, `host` y `topic` son obligatorios.
+- Si `remote_config.enabled=true`, `remote_config.endpoint` debe ser `https://` o loopback.
+- Si `updates.enabled=true`, `updates.manifest_url` debe ser `https://` o loopback.
 
-Reglas de validacion de API:
-
-- `sample_interval_seconds` debe estar entre `1` y `3600`.
-- Si `outputs.webhook.enabled=true`, `outputs.webhook.url` debe ser URL HTTP(S) valida.
-- Si `outputs.mqtt.enabled=true`, `host` y `topic` son obligatorios y `port` debe estar entre `1` y `65535`.
-
-#### Ejemplo
+Ejemplo:
 
 ```bash
 curl -X PUT http://127.0.0.1:8000/api/config \
@@ -244,293 +173,227 @@ curl -X PUT http://127.0.0.1:8000/api/config \
   -d '{
     "station_id": "meteo-casa",
     "sample_interval_seconds": 10,
-    "collector": {"enabled": true},
-    "outputs": {
-      "webhook": {"enabled": true, "url": "https://example.com/hook"}
-    },
-    "exports": {
+    "telemetry": {
       "enabled": true,
-      "schedule": {"time_utc": "02:00"}
+      "destinations": [
+        {
+          "id": "dest-1",
+          "enabled": true,
+          "kind": "webhook_https",
+          "data_classes": ["weather_measurement", "station_status"],
+          "schedule": {"mode": "realtime", "interval_seconds": 60},
+          "batch_max_items": 1,
+          "auth": {"mode": "bearer", "key_id": "dest-1"},
+          "webhook": {"url": "https://example.com/hook", "timeout_seconds": 5}
+        }
+      ]
     },
-    "ui": {"timezone": "Europe/Madrid"}
+    "updates": {
+      "enabled": true,
+      "manifest_url": "https://updates.example.com/stable/manifest.json",
+      "channel": "stable"
+    }
   }'
 ```
 
-#### Respuesta 200 (ok)
+### GET /api/config/secrets
 
-```json
-{
-  "ok": true,
-  "config": {
-    "station_id": "meteo-casa",
-    "sample_interval_seconds": 10
-  }
-}
+Devuelve un resumen enmascarado de `data/device_secrets.json`.
+
+### PUT /api/config/secrets
+
+Aplica un merge de secrets sensibles. Ejemplo:
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/config/secrets \
+  -u admin:admin \
+  -H "Content-Type: application/json" \
+  -d '{
+    "telemetry_destinations": {
+      "dest-1": {
+        "bearer_token": "secret-token"
+      }
+    },
+    "remote_config": {
+      "bearer_token": "cfg-token"
+    },
+    "updates": {
+      "bearer_token": "upd-token"
+    }
+  }'
 ```
 
-#### Respuesta 400 (error de validacion)
+## Telemetría saliente y outbox
 
-```json
-{
-  "ok": false,
-  "error": "sample_interval_seconds debe estar entre 1 y 3600"
-}
-```
+### GET /api/telemetry/status
 
-## 4) Outbox
+Devuelve:
 
-La outbox almacena envios pendientes/sent/failed para destinos como webhook o MQTT.
-
-### Estados y campos frecuentes
-
-- Estados: `pending`, `sent`, `failed`.
-- Campos por item (listado):
-  - `id`
-  - `created_ts`
-  - `next_attempt_ts`
-  - `attempts`
-  - `status`
-  - `destination`
-  - `last_error`
+- `enabled`
+- `destinations`
+- `outbox.summary`
+- `outbox.destinations`
 
 ### GET /api/outbox
 
-Lista items y resumen.
+Lista la cola persistente de entrega. Campos habituales por item:
 
-Query params:
-
-- `status` (opcional): filtra por estado.
-- `limit` (opcional, default `100`): maximo de registros.
-
-```bash
-curl "http://127.0.0.1:8000/api/outbox"
-curl "http://127.0.0.1:8000/api/outbox?status=failed&limit=50"
-```
-
-Respuesta 200:
-
-```json
-{
-  "summary": {
-    "pending": 120,
-    "sent": 980,
-    "failed": 5
-  },
-  "items": [
-    {
-      "id": 101,
-      "created_ts": 1712230000,
-      "next_attempt_ts": 1712230600,
-      "attempts": 4,
-      "status": "failed",
-      "destination": "webhook",
-      "last_error": "timeout"
-    }
-  ]
-}
-```
+- `id`
+- `status` (`pending`, `leased`, `sent`, `failed`)
+- `destination_id`
+- `delivery_kind`
+- `data_class`
+- `attempts`
+- `next_attempt_ts`
+- `response_code`
+- `last_error`
 
 ### POST /api/outbox/retry_failed
 
-Reencola todos los registros en `failed` a `pending`.
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/outbox/retry_failed \
-  -u admin:admin
-```
-
-Respuesta 200:
-
-```json
-{
-  "ok": true,
-  "retried": 5
-}
-```
+Reencola todos los `failed` a `pending`.
 
 ### POST /api/outbox/purge_sent
 
-Purga enviados antiguos y conserva los ultimos `keep_last`.
+Purga enviados antiguos conservando `keep_last`.
 
-Query params:
+## Workers del sistema
 
-- `keep_last` (opcional, default `1000`).
+### GET /api/system/version
 
-```bash
-curl -X POST "http://127.0.0.1:8000/api/outbox/purge_sent?keep_last=500" \
-  -u admin:admin
-```
+Devuelve:
 
-Respuesta 200:
+- `app_version`
+- `current_version`
+- `target_version`
+- `channel`
+- `update_status`
+
+### GET /api/system/workers
+
+Lista heartbeats persistentes de:
+
+- `collector`
+- `delivery`
+- `remote_config`
+- `update`
+
+Cada item incluye `status`, `updated_ts`, `stale` y `details`.
+
+## Configuración remota
+
+### GET /api/remote-config/status
+
+Estado de revisión remota y overlay aplicado.
+
+### POST /api/remote-config/check-now
+
+Lanza una comprobación inmediata del manifest/config remotos.
+
+El flujo esperado es:
+
+1. La estación consulta un manifest JSON remoto.
+2. Si detecta una `revision` nueva, carga `config` inline o `config_url`.
+3. Verifica `sha256` y la firma configurada.
+4. Sanitiza el overlay y solo permite namespaces remotos seguros.
+5. Aplica el overlay si `auto_apply=true`.
+
+## Updates pull
+
+### GET /api/update/status
+
+Devuelve:
+
+- `state`
+- `history`
+
+Estados de update soportados:
+
+- `idle`
+- `available`
+- `downloading`
+- `verified`
+- `applied`
+- `failed`
+- `rollback`
+
+### POST /api/update/check-now
+
+Consulta el manifest remoto de updates y, si `auto_download=true`, descarga y verifica el bundle.
+
+Manifest esperado:
 
 ```json
 {
-  "ok": true,
-  "deleted": 340,
-  "keep_last": 500
+  "version": "1.2.0",
+  "channel": "stable",
+  "artifact_url": "https://updates.example.com/weatherpi-1.2.0.zip",
+  "sha256": "....",
+  "signature": "....",
+  "signature_algorithm": "ed25519"
 }
 ```
 
-## 5) Exportacion CSV puntual
+### POST /api/update/apply
 
-### GET /api/export.csv
+Aplica el bundle staged. En runtime Linux:
 
-Genera streaming CSV para una ventana temporal de `days` dias hacia atras desde ahora.
+- extrae a `data/releases/versions/<version>`
+- actualiza enlaces `current` y `previous`
+- deja una marca `data/runtime/restart_required.json`
 
-Query params:
+En Windows/desarrollo devuelve error controlado porque el flujo de swap y rollback está pensado para Linux/Raspberry.
 
-- `days` (opcional, default `7`).
+### POST /api/update/rollback
 
-```bash
-curl -L "http://127.0.0.1:8000/api/export.csv?days=3" -o meteo_ultimos_3_dias.csv
-```
+Vuelve el enlace `current` al target de `previous` y registra el evento en `release_history`.
 
-Cabecera y formato CSV:
+## Export y backup local
 
-```text
-ts;temp_c;humidity_pct;pressure_hpa
-1712200000;22.1;50.0;1012.9
-```
+### GET /api/export.csv?days=7
 
-## 6) Historial de exports
+Export streaming CSV para una ventana temporal.
 
 ### GET /api/exports
 
-Lista archivos de export almacenados.
-
-Query params:
-
-- `limit` (opcional, default `50`).
-
-```bash
-curl "http://127.0.0.1:8000/api/exports?limit=20"
-```
-
-Respuesta 200:
-
-```json
-{
-  "items": [
-    {
-      "id": 12,
-      "created_ts": 1712230000,
-      "period_from_ts": 1712143600,
-      "period_to_ts": 1712230000,
-      "filename": "meteo_2026_04_04.csv",
-      "path": "data/exports/meteo_2026_04_04.csv"
-    }
-  ]
-}
-```
+Historial de exports locales guardados por el backup worker.
 
 ### GET /api/exports/{export_id}
 
-Descarga un CSV por identificador.
+Descarga un export concreto por id.
 
-```bash
-curl -L "http://127.0.0.1:8000/api/exports/12" -o export_12.csv
-```
+## Ejemplos rápidos
 
-Errores:
-
-- `404` + `{"detail":"export not found"}` si no existe id.
-- `404` + `{"detail":"export file missing"}` si falta el archivo en disco.
-
-## Ejemplos de integracion
-
-### JavaScript (fetch)
+### JavaScript
 
 ```js
-const base = "http://127.0.0.1:8000";
-const basic = "Basic " + btoa("reader:reader");
+const auth = "Basic " + btoa("admin:admin");
 
-async function getLatest() {
-  const res = await fetch(`${base}/api/latest`, { headers: { Authorization: basic } });
+async function getTelemetryStatus() {
+  const res = await fetch("/api/telemetry/status", { headers: { Authorization: auth } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json = await res.json();
-  return json.data;
-}
-
-async function updateInterval(seconds) {
-  const adminBasic = "Basic " + btoa("admin:admin");
-  const cfgRes = await fetch(`${base}/api/config`, { headers: { Authorization: adminBasic } });
-  const cfg = (await cfgRes.json()).config;
-
-  cfg.sample_interval_seconds = seconds;
-
-  const putRes = await fetch(`${base}/api/config`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: adminBasic,
-    },
-    body: JSON.stringify(cfg),
-  });
-
-  const out = await putRes.json();
-  if (!out.ok) throw new Error(out.error || "No se pudo actualizar config");
-  return out.config;
+  return res.json();
 }
 ```
 
-### Python (httpx)
+### Python
 
 ```python
 import httpx
 
-BASE = "http://127.0.0.1:8000"
-AUTH = ("admin", "admin")
-
-with httpx.Client(timeout=10) as client:
-  status = client.get(f"{BASE}/api/status", auth=AUTH).json()
-  latest = client.get(f"{BASE}/api/latest", auth=AUTH).json()
-
-  cfg = client.get(f"{BASE}/api/config", auth=AUTH).json()["config"]
-    cfg["sample_interval_seconds"] = 15
-
-  updated = client.put(f"{BASE}/api/config", json=cfg, auth=AUTH).json()
-    if not updated.get("ok"):
-        raise RuntimeError(updated.get("error", "Error actualizando config"))
-
-    print(status)
-    print(latest)
+with httpx.Client(base_url="http://127.0.0.1:8000", auth=("admin", "admin"), timeout=10) as client:
+    config = client.get("/api/config").json()
+    update_state = client.get("/api/update/status").json()
+    print(config["sources"])
+    print(update_state["state"]["status"])
 ```
 
-## Troubleshooting rapido
+## Troubleshooting rápido
 
-1. `Connection refused`.
-   - Verifica que este levantado el backend en puerto 8000.
-2. PUT `/api/config` devuelve `ok=false`.
-   - Ajusta `sample_interval_seconds` al rango 1..3600.
-3. `/api/exports/{id}` da 404 `export file missing`.
-   - El registro existe pero el archivo fue movido/eliminado del disco.
-4. `/api/latest` devuelve `data: null`.
-   - Todavia no hay mediciones insertadas.
-
-## Flujo recomendado
-
-1. Comprobar estado con `/api/status`.
-2. Leer ultima muestra con `/api/latest`.
-3. Obtener config actual (`GET /api/config`) y actualizar por merge (`PUT /api/config`).
-4. Mantener outbox con `/api/outbox`, `retry_failed` y `purge_sent`.
-5. Exportar con `/api/export.csv` o descargar historicos con `/api/exports/{id}`.
-
-## 7) Ampliaciones recomendadas
-
-Estas piezas no estan expuestas como API hoy, pero encajan bien en la siguiente iteracion del sistema:
-
-- Catalogo de sensores: tipo, modelo, canal, estado y fecha de alta.
-- Historial de mantenimiento: intervenciones, notas, repuestos y fecha de revision.
-- Versionado del sistema: version de firmware, version de software y version de configuracion.
-- Actualizacion remota segura: paquete firmado, verificacion de integridad y canal autenticado.
-- Rollback automatico: restaurar la version anterior si el arranque o la verificacion fallan.
-
-Una posible forma de modelarlo seria exponer endpoints como:
-
-- `GET /api/system/version`
-- `GET /api/sensors`
-- `GET /api/maintenance`
-- `POST /api/firmware/update`
-- `POST /api/firmware/rollback`
-
-Si se implementa, conviene mantener estos flujos separados de la telemetria normal para no mezclar lectura de datos con operaciones de administracion.
+1. Las funciones remotas aparecen bloqueadas.
+   - Revisa credenciales locales por defecto y que exista `data/device_secrets.json`.
+2. `PUT /api/config` devuelve validación.
+   - Revisa `telemetry.destinations`, URLs HTTPS/loopback y rangos numéricos.
+3. `POST /api/update/apply` devuelve conflicto.
+   - Verifica que exista un bundle staged y que el runtime objetivo sea Linux/Raspberry.
+4. `GET /api/system/workers` marca `stale=true`.
+   - El worker correspondiente no está enviando heartbeat o dejó de ejecutarse.

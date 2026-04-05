@@ -67,6 +67,8 @@ Thumbs.db
 data/meteo.db
 data/meteo.db-shm
 data/meteo.db-wal
+data/local_auth.json
+data/device_secrets.json
 data/exports/
 *.csv
 .env

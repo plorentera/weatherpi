@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="Estado de la cola de envíos de Meteo Station" />
+  <meta name="description" content="Estado de envios pendientes de Meteo Station" />
   <title>Outbox - Meteo Station</title>
   <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/style.css" />
@@ -12,13 +12,13 @@
   <nav class="navbar navbar-expand-lg bg-body border-bottom sticky-top">
     <div class="container py-2">
       <a class="navbar-brand fw-semibold" href="/">Meteo Station</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegación">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegacion">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="mainNav">
         <div class="navbar-nav ms-auto gap-lg-2">
           <a class="nav-link" href="/">Dashboard</a>
-          <a class="nav-link" href="/settings.html">Configuración</a>
+          <a class="nav-link" href="/settings.html">Configuracion</a>
           <a class="nav-link active" href="/outbox.html">Outbox</a>
           <a class="nav-link" href="/exports.html">Exports</a>
           <a class="nav-link" href="/api.html">API</a>
@@ -30,68 +30,140 @@
   <main class="container py-4 py-lg-5">
     <section class="card shadow-sm mb-4">
       <div class="card-body p-4 p-lg-5">
-        <div class="row align-items-end g-4">
+        <div class="row g-4 align-items-center">
           <div class="col-lg-8">
-            <div class="text-uppercase text-secondary small fw-semibold mb-2">Cola de entregas</div>
-            <h1 class="display-6 fw-semibold mb-3">Seguimiento de outbox y reintentos</h1>
-            <p class="lead text-secondary mb-0">Gestiona los envíos pendientes, reintenta fallos y revisa la cola sin salir del panel.</p>
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Envio de datos</div>
+            <h1 class="display-6 fw-semibold mb-3">Cola de salida y reintentos</h1>
+            <p class="lead text-secondary mb-0">
+              Aqui puedes ver si hay mensajes pendientes, si algo esta fallando y si los workers siguen trabajando con normalidad.
+            </p>
           </div>
-          <div class="col-lg-4 text-lg-end">
-            <a class="btn btn-outline-secondary" href="/settings.html">Ajustar outputs</a>
+          <div class="col-lg-4">
+            <div class="d-grid gap-2">
+              <button id="retryBtn" class="btn btn-primary">Reintentar errores</button>
+              <button id="purgeBtn" class="btn btn-outline-secondary">Limpiar enviados antiguos</button>
+              <a class="btn btn-outline-secondary" href="/settings.html">Volver a configuracion</a>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="card shadow-sm p-4 mb-4">
-      <div class="row g-3 align-items-end">
-        <div class="col-lg-6">
-          <div class="small text-uppercase text-secondary fw-semibold mb-2">Resumen</div>
-          <div class="small text-secondary" id="summary">cargando…</div>
+    <div id="feedbackAlert" class="alert d-none" role="alert">
+      <div id="feedbackText">-</div>
+    </div>
+
+    <section class="row g-3 mb-4">
+      <div class="col-6 col-lg-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="text-secondary small">Pendientes</div>
+            <div class="display-6 fw-semibold" id="summaryPending">-</div>
+          </div>
         </div>
-        <div class="col-lg-6">
-          <div class="d-flex flex-wrap gap-2 justify-content-lg-end align-items-center">
-            <button id="retryBtn" class="btn btn-primary">Reintentar fallidos</button>
-            <button id="purgeBtn" class="btn btn-outline-secondary">Purgar sent</button>
-            <select id="filter" class="form-select w-auto">
-              <option value="">todos</option>
-              <option value="pending">pending</option>
-              <option value="sent">sent</option>
-              <option value="failed">failed</option>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="text-secondary small">Con error</div>
+            <div class="display-6 fw-semibold" id="summaryFailed">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="text-secondary small">Enviados</div>
+            <div class="display-6 fw-semibold" id="summarySent">-</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-6 col-lg-3">
+        <div class="card shadow-sm h-100">
+          <div class="card-body">
+            <div class="text-secondary small">Ultimo envio correcto</div>
+            <div class="fw-semibold" id="summaryLastSuccess">-</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card shadow-sm mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+          <div>
+            <div class="text-uppercase text-secondary small fw-semibold mb-1">Workers</div>
+            <div class="small text-secondary">Estado de collector, delivery, remote config y updates.</div>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Estado</th>
+                <th>Ultima actualizacion</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="workersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="card shadow-sm mb-4">
+      <div class="card-body p-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+          <div>
+            <div class="text-uppercase text-secondary small fw-semibold mb-1">Mensajes</div>
+            <div class="small text-secondary" id="summaryLastError">-</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <label for="filter" class="small text-secondary mb-0">Mostrar</label>
+            <select id="filter" class="form-select">
+              <option value="">Todos</option>
+              <option value="pending">Pendientes</option>
+              <option value="leased">En curso</option>
+              <option value="sent">Enviados</option>
+              <option value="failed">Con error</option>
             </select>
-            <span id="msg" class="small text-secondary">—</span>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-striped align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Estado</th>
+                <th>Destino</th>
+                <th>Tipo</th>
+                <th>Intentos</th>
+                <th>Ultimo intento</th>
+                <th>Proximo intento</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="accordion" id="outboxDebugAccordion">
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#outboxDebugPane" aria-expanded="false" aria-controls="outboxDebugPane">
+            Debug y JSON completo
+          </button>
+        </h2>
+        <div id="outboxDebugPane" class="accordion-collapse collapse" data-bs-parent="#outboxDebugAccordion">
+          <div class="accordion-body">
+            <pre id="items" class="pre mb-0">cargando...</pre>
           </div>
         </div>
       </div>
-    </section>
-
-    <section class="card shadow-sm p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
-        <div>
-          <div class="small text-uppercase text-secondary fw-semibold mb-1">Últimos envíos</div>
-          <div class="small text-secondary mb-0">Los estados marcados como muerto indican fallos definitivos y requieren intervención manual.</div>
-        </div>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-striped align-middle mb-0">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Estado</th>
-              <th>Destino</th>
-              <th>Intentos</th>
-              <th>Next attempt</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="card shadow-sm p-4">
-      <div class="small text-uppercase text-secondary fw-semibold mb-3">Raw JSON (debug)</div>
-      <pre id="items" class="pre mb-0">cargando…</pre>
     </section>
   </main>
 

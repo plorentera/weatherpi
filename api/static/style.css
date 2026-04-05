@@ -16,8 +16,10 @@ body {
 
 .pre {
   font-size: 0.875rem;
-  max-height: 28rem;
+  max-height: 24rem;
   overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .value {

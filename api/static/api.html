@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="description" content="Guia API de Meteo Station" />
+  <meta name="description" content="Integracion y soporte de Meteo Station" />
   <title>API - Meteo Station</title>
   <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="/style.css" />
@@ -12,13 +12,13 @@
   <nav class="navbar navbar-expand-lg bg-body border-bottom sticky-top">
     <div class="container py-2">
       <a class="navbar-brand fw-semibold" href="/">Meteo Station</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegación">
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Alternar navegacion">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="mainNav">
         <div class="navbar-nav ms-auto gap-lg-2">
           <a class="nav-link" href="/">Dashboard</a>
-          <a class="nav-link" href="/settings.html">Configuración</a>
+          <a class="nav-link" href="/settings.html">Configuracion</a>
           <a class="nav-link" href="/outbox.html">Outbox</a>
           <a class="nav-link" href="/exports.html">Exports</a>
           <a class="nav-link active" href="/api.html">API</a>
@@ -30,14 +30,19 @@
   <main class="container py-4 py-lg-5">
     <section class="card shadow-sm mb-4">
       <div class="card-body p-4 p-lg-5">
-        <div class="row align-items-end g-4">
+        <div class="row g-4 align-items-center">
           <div class="col-lg-8">
-            <div class="text-uppercase text-secondary small fw-semibold mb-2">Referencia de integración</div>
-            <h1 class="display-6 fw-semibold mb-3">API HTTP de la estación meteorológica</h1>
-            <p class="lead text-secondary mb-0">Desde aquí puedes consultar las rutas disponibles, sus usos y los flujos recomendados para integrarlas.</p>
-            <div class="d-flex flex-wrap gap-2 mt-4">
-              <a class="btn btn-primary" href="/docs/API.md" target="_blank" rel="noreferrer">Abrir docs/API.md</a>
-              <a class="btn btn-outline-secondary" href="/api/status" target="_blank" rel="noreferrer">Ver /api/status</a>
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Integracion y soporte</div>
+            <h1 class="display-6 fw-semibold mb-3">API local de Meteo Station</h1>
+            <p class="lead text-secondary mb-0">
+              Esta seccion es util si vas a integrar la estacion con otro sistema, dar soporte o desarrollar encima de la API.
+            </p>
+          </div>
+          <div class="col-lg-4">
+            <div class="d-grid gap-2">
+              <a class="btn btn-primary" href="/docs" target="_blank" rel="noreferrer">Abrir Swagger</a>
+              <a class="btn btn-outline-secondary" href="/docs/API.md" target="_blank" rel="noreferrer">Abrir guia extendida</a>
+              <a class="btn btn-outline-secondary" href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI JSON</a>
             </div>
           </div>
         </div>
@@ -48,43 +53,39 @@
       <div class="col-lg-4">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-            <div class="small text-uppercase text-secondary fw-semibold mb-2">Base URL</div>
-            <div class="fs-6 fw-semibold">http://127.0.0.1:8000</div>
-            <hr>
-            <div class="small text-uppercase text-secondary fw-semibold mb-2">Seguridad</div>
-            <div class="small text-secondary mb-3">Todo el webserver usa HTTP Basic. Usa credenciales reader para lectura y admin para escritura.</div>
-            <div class="small text-uppercase text-secondary fw-semibold mb-2">Recursos técnicos</div>
-            <div class="d-grid gap-2">
-                <a class="small text-secondary text-decoration-none" href="/docs/API.md" target="_blank" rel="noreferrer">Guía extendida: docs/API.md</a>
-            </div>
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Cuándo usarla</div>
+            <ul class="text-secondary mb-0 ps-3">
+              <li>Integrar con otro sistema local</li>
+              <li>Automatizar tareas</li>
+              <li>Soporte y diagnostico</li>
+              <li>Desarrollo y pruebas</li>
+            </ul>
           </div>
         </div>
       </div>
-
       <div class="col-lg-8">
         <div class="card shadow-sm h-100">
           <div class="card-body p-4">
-            <div class="small text-uppercase text-secondary fw-semibold mb-3">Endpoints principales</div>
+            <div class="text-uppercase text-secondary small fw-semibold mb-2">Endpoints mas utiles</div>
             <div class="table-responsive">
               <table class="table table-striped align-middle mb-0">
                 <thead>
                   <tr>
-                    <th>Método</th>
+                    <th>Metodo</th>
                     <th>Ruta</th>
                     <th>Uso</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/status</td><td>Estado de la estación y conteo de mediciones</td></tr>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/latest</td><td>Última lectura registrada</td></tr>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/config</td><td>Lectura de configuración</td></tr>
-                  <tr><td><span class="badge text-bg-primary">PUT</span></td><td>/api/config</td><td>Actualización de configuración</td></tr>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/outbox</td><td>Resumen y listado de cola de envíos</td></tr>
-                  <tr><td><span class="badge text-bg-warning text-dark">POST</span></td><td>/api/outbox/retry_failed</td><td>Reintenta fallidos</td></tr>
-                  <tr><td><span class="badge text-bg-warning text-dark">POST</span></td><td>/api/outbox/purge_sent</td><td>Purga enviados antiguos</td></tr>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/export.csv</td><td>Export CSV por rango de días</td></tr>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/exports</td><td>Listado de exports guardados</td></tr>
-                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/exports/{id}</td><td>Descarga de un export concreto</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/status</td><td>Estado general de la estacion</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/config</td><td>Config efectiva y local</td></tr>
+                  <tr><td><span class="badge text-bg-primary">PUT</span></td><td>/api/config</td><td>Guardar configuracion local</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/system/access</td><td>Host, puerto y URLs utiles</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/system/workers</td><td>Estado de workers</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/telemetry/status</td><td>Estado de envio y outbox</td></tr>
+                  <tr><td><span class="badge text-bg-warning text-dark">POST</span></td><td>/api/telemetry/test</td><td>Encolar una prueba de envio</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/update/status</td><td>Estado de updates</td></tr>
+                  <tr><td><span class="badge text-bg-success">GET</span></td><td>/api/remote-config/status</td><td>Estado de configuracion remota</td></tr>
                 </tbody>
               </table>
             </div>
@@ -93,12 +94,15 @@
       </div>
     </section>
 
-    <section class="card shadow-sm p-4">
-      <div class="small text-uppercase text-secondary fw-semibold mb-2">Sugerencia de uso profesional</div>
-      <ol class="mb-0 text-secondary">
-        <li>Usar esta página local para descubrir endpoints y sus funciones.</li>
-        <li>Consultar <a href="/docs/API.md" target="_blank" rel="noreferrer">docs/API.md</a> para ejemplos de integración en curl, JS y Python.</li>
-      </ol>
+    <section class="card shadow-sm">
+      <div class="card-body p-4">
+        <div class="text-uppercase text-secondary small fw-semibold mb-2">Flujo recomendado</div>
+        <ol class="mb-0 text-secondary">
+          <li>Configura la estacion desde <a href="/settings.html">Configuracion</a>.</li>
+          <li>Comprueba la cola de envio en <a href="/outbox.html">Outbox</a> si algo no llega.</li>
+          <li>Usa esta API solo cuando necesites integrar, automatizar o diagnosticar.</li>
+        </ol>
+      </div>
     </section>
   </main>
 
