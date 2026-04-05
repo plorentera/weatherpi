@@ -257,6 +257,7 @@ PUBLIC_PATHS = {
     "/vendor/bootstrap/bootstrap.min.css",
     "/vendor/bootstrap/bootstrap.bundle.min.js",
     "/style.css",
+    "/js/login.js",
 }
 
 
