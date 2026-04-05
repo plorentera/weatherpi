@@ -6,6 +6,7 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
+from common.alerts import alert_config_hash, build_local_revision, normalize_alerts_config
 from common.config import (
     APP_VERSION,
     DATA_DIR,
@@ -45,6 +46,14 @@ def _ensure_singleton_rows(cur: sqlite3.Cursor) -> None:
         "INSERT OR IGNORE INTO update_state(id, current_version, channel, status, signature_ok) VALUES (1, ?, 'stable', 'idle', 0)",
         (APP_VERSION,),
     )
+    cur.execute(
+        """
+        INSERT OR IGNORE INTO alert_config_state(
+            id, desired_revision, applied_revision, source, sync_status, applied_hash, last_error
+        )
+        VALUES (1, '', '', 'local', 'in_sync', '', '')
+        """
+    )
 
 
 def _migrate_legacy_config_if_needed(cur: sqlite3.Cursor) -> None:
@@ -61,6 +70,55 @@ def _migrate_legacy_config_if_needed(cur: sqlite3.Cursor) -> None:
         cur.execute(
             "UPDATE settings SET value=? WHERE key='config'",
             (json.dumps(normalized),),
+        )
+
+
+def _ensure_alert_state_from_config(cur: sqlite3.Cursor) -> None:
+    cur.execute("SELECT value FROM settings WHERE key='config' LIMIT 1")
+    row = cur.fetchone()
+    try:
+        current = json.loads(row["value"]) if row and row["value"] else {}
+    except Exception:
+        current = {}
+
+    normalized = normalize_local_config(current)
+    alerts_cfg = normalize_alerts_config(normalized.get("alerts"))
+    applied_hash = alert_config_hash(alerts_cfg)
+    applied_revision = build_local_revision(int(normalized.get("_rev", 0)))
+
+    cur.execute("SELECT desired_revision, applied_revision, source, sync_status, applied_hash FROM alert_config_state WHERE id=1")
+    state = cur.fetchone()
+    if not state:
+        cur.execute(
+            """
+            INSERT INTO alert_config_state(
+                id, desired_revision, applied_revision, source, sync_status, applied_hash, last_error
+            )
+            VALUES (1, '', ?, 'local', 'in_sync', ?, '')
+            """,
+            (applied_revision, applied_hash),
+        )
+        return
+
+    desired_revision = str(state["desired_revision"] or "")
+    source = str(state["source"] or "local")
+    sync_status = str(state["sync_status"] or "in_sync")
+    state_applied_hash = str(state["applied_hash"] or "")
+    state_applied_revision = str(state["applied_revision"] or "")
+
+    if not state_applied_hash or not state_applied_revision:
+        cur.execute(
+            """
+            UPDATE alert_config_state
+            SET applied_revision=?, applied_hash=?, source=?, sync_status=?
+            WHERE id=1
+            """,
+            (
+                state_applied_revision or applied_revision,
+                state_applied_hash or applied_hash,
+                source or "local",
+                sync_status or ("in_sync" if not desired_revision else "local_override"),
+            ),
         )
 
 
@@ -191,6 +249,42 @@ def init_db() -> None:
 
     cur.execute(
         """
+        CREATE TABLE IF NOT EXISTS alert_config_state (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            desired_revision TEXT,
+            applied_revision TEXT,
+            source TEXT NOT NULL DEFAULT 'local',
+            sync_status TEXT NOT NULL DEFAULT 'in_sync',
+            applied_at INTEGER,
+            desired_hash TEXT,
+            applied_hash TEXT,
+            last_error TEXT,
+            last_remote_check_ts INTEGER,
+            last_report_ts INTEGER,
+            remote_endpoint TEXT,
+            status_endpoint TEXT
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alert_rule_state (
+            rule_id TEXT PRIMARY KEY,
+            active INTEGER NOT NULL DEFAULT 0,
+            condition_since_ts INTEGER,
+            last_fired_ts INTEGER,
+            last_resolved_ts INTEGER,
+            last_value TEXT,
+            last_evaluated_ts INTEGER,
+            last_status TEXT,
+            last_message TEXT
+        )
+        """
+    )
+
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS remote_config_state (
             id INTEGER PRIMARY KEY CHECK(id = 1),
             current_revision TEXT,
@@ -243,6 +337,7 @@ def init_db() -> None:
     _ensure_singleton_rows(cur)
     _migrate_legacy_config_if_needed(cur)
     _migrate_legacy_outbox_rows(cur)
+    _ensure_alert_state_from_config(cur)
 
     conn.commit()
     conn.close()
@@ -315,6 +410,7 @@ def get_config_bundle() -> Dict[str, Any]:
     remote_overlay = get_remote_overlay()
     effective = build_effective_config(local_config, remote_overlay)
     remote_state = get_remote_config_state()
+    alert_state = get_alert_config_state()
     effective["_rev"] = _effective_revision(int(local_config.get("_rev", 0)), str(remote_state.get("current_revision") or ""))
     return {
         "config": effective,
@@ -325,17 +421,44 @@ def get_config_bundle() -> Dict[str, Any]:
             "local_rev": int(local_config.get("_rev", 0)),
             "remote_revision": remote_state.get("current_revision"),
             "remote_status": remote_state.get("status"),
+            "alerts_applied_revision": alert_state.get("applied_revision"),
+            "alerts_sync_status": alert_state.get("sync_status"),
         },
     }
 
 
-def set_config(cfg: Dict[str, Any]) -> None:
+def _update_alert_state_for_local_change(previous_cfg: Dict[str, Any], new_cfg: Dict[str, Any], *, local_revision: int) -> None:
+    previous_alerts = normalize_alerts_config(previous_cfg.get("alerts"))
+    current_alerts = normalize_alerts_config(new_cfg.get("alerts"))
+    if previous_alerts == current_alerts:
+        return
+
+    state = get_alert_config_state()
+    applied_hash = alert_config_hash(current_alerts)
+    desired_hash = str(state.get("desired_hash") or "")
+    desired_revision = str(state.get("desired_revision") or "")
+    sync_status = "local_override" if desired_hash and desired_hash != applied_hash else "in_sync"
+    applied_revision = desired_revision if desired_hash and desired_hash == applied_hash and desired_revision else build_local_revision(local_revision)
+    set_alert_config_state(
+        applied_revision=applied_revision,
+        source="local",
+        sync_status=sync_status,
+        applied_at=int(time.time()),
+        applied_hash=applied_hash,
+        last_error="",
+    )
+    prune_alert_rule_states([str(rule.get("id") or "") for rule in current_alerts.get("rules", [])])
+
+
+def set_config(cfg: Dict[str, Any], *, change_source: str = "local") -> None:
     current = get_local_config()
     rev = int(current.get("_rev", 0)) + 1
     merged = deep_merge(current, cfg if isinstance(cfg, dict) else {})
     normalized = normalize_local_config(merged)
     normalized["_rev"] = rev
     set_setting("config", json.dumps(normalized))
+    if change_source == "local":
+        _update_alert_state_for_local_change(current, normalized, local_revision=rev)
 
 
 def set_remote_overlay(
@@ -730,6 +853,25 @@ def telemetry_delivery_summary() -> Dict[str, Any]:
     }
 
 
+def oldest_unsent_outbox_age_seconds(now_ts: Optional[int] = None) -> int:
+    reference_ts = int(now_ts or time.time())
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT MIN(created_ts) AS oldest_created_ts
+        FROM outbox
+        WHERE status IN ('pending', 'leased', 'failed')
+        """
+    )
+    row = cur.fetchone()
+    conn.close()
+    oldest_created_ts = row["oldest_created_ts"] if row else None
+    if not oldest_created_ts:
+        return 0
+    return max(0, reference_ts - int(oldest_created_ts))
+
+
 def upsert_worker_heartbeat(worker_name: str, status: str, details: Dict[str, Any] | None = None) -> None:
     payload = json.dumps(details or {}, sort_keys=True)
     now_ts = int(time.time())
@@ -774,6 +916,197 @@ def fetch_worker_heartbeats(stale_after_seconds: int = 120) -> List[Dict[str, An
             }
         )
     return items
+
+
+def get_alert_config_state() -> Dict[str, Any]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM alert_config_state WHERE id=1")
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return {
+            "desired_revision": "",
+            "applied_revision": "",
+            "source": "local",
+            "sync_status": "in_sync",
+            "applied_at": None,
+            "desired_hash": "",
+            "applied_hash": "",
+            "config_hash": "",
+            "last_error": "",
+            "last_remote_check_ts": None,
+            "last_report_ts": None,
+            "remote_endpoint": "",
+            "status_endpoint": "",
+        }
+    result = dict(row)
+    result["config_hash"] = str(result.get("applied_hash") or "")
+    result["last_change_source"] = str(result.get("source") or "local")
+    return result
+
+
+def set_alert_config_state(**updates: Any) -> Dict[str, Any]:
+    current = get_alert_config_state()
+    current.update(updates)
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO alert_config_state(
+            id, desired_revision, applied_revision, source, sync_status, applied_at, desired_hash,
+            applied_hash, last_error, last_remote_check_ts, last_report_ts, remote_endpoint, status_endpoint
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            desired_revision=excluded.desired_revision,
+            applied_revision=excluded.applied_revision,
+            source=excluded.source,
+            sync_status=excluded.sync_status,
+            applied_at=excluded.applied_at,
+            desired_hash=excluded.desired_hash,
+            applied_hash=excluded.applied_hash,
+            last_error=excluded.last_error,
+            last_remote_check_ts=excluded.last_remote_check_ts,
+            last_report_ts=excluded.last_report_ts,
+            remote_endpoint=excluded.remote_endpoint,
+            status_endpoint=excluded.status_endpoint
+        """,
+        (
+            current.get("desired_revision", ""),
+            current.get("applied_revision", ""),
+            current.get("source", "local"),
+            current.get("sync_status", "in_sync"),
+            current.get("applied_at"),
+            current.get("desired_hash", ""),
+            current.get("applied_hash", ""),
+            current.get("last_error", ""),
+            current.get("last_remote_check_ts"),
+            current.get("last_report_ts"),
+            current.get("remote_endpoint", ""),
+            current.get("status_endpoint", ""),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    current["config_hash"] = str(current.get("applied_hash") or "")
+    current["last_change_source"] = str(current.get("source") or "local")
+    return current
+
+
+def list_alert_rule_states() -> List[Dict[str, Any]]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT rule_id, active, condition_since_ts, last_fired_ts, last_resolved_ts, last_value,
+               last_evaluated_ts, last_status, last_message
+        FROM alert_rule_state
+        ORDER BY rule_id ASC
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["active"] = bool(item.get("active", 0))
+        raw_last_value = item.get("last_value")
+        if isinstance(raw_last_value, str):
+            try:
+                item["last_value"] = json.loads(raw_last_value)
+            except Exception:
+                item["last_value"] = raw_last_value
+        items.append(item)
+    return items
+
+
+def alert_rule_state_map() -> Dict[str, Dict[str, Any]]:
+    return {str(item.get("rule_id") or ""): item for item in list_alert_rule_states()}
+
+
+def upsert_alert_rule_state(rule_id: str, state: Dict[str, Any]) -> None:
+    payload = dict(state or {})
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO alert_rule_state(
+            rule_id, active, condition_since_ts, last_fired_ts, last_resolved_ts, last_value,
+            last_evaluated_ts, last_status, last_message
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(rule_id) DO UPDATE SET
+            active=excluded.active,
+            condition_since_ts=excluded.condition_since_ts,
+            last_fired_ts=excluded.last_fired_ts,
+            last_resolved_ts=excluded.last_resolved_ts,
+            last_value=excluded.last_value,
+            last_evaluated_ts=excluded.last_evaluated_ts,
+            last_status=excluded.last_status,
+            last_message=excluded.last_message
+        """,
+        (
+            rule_id,
+            1 if payload.get("active") else 0,
+            payload.get("condition_since_ts"),
+            payload.get("last_fired_ts"),
+            payload.get("last_resolved_ts"),
+            json.dumps(payload.get("last_value")),
+            payload.get("last_evaluated_ts"),
+            payload.get("last_status"),
+            payload.get("last_message", ""),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def prune_alert_rule_states(valid_rule_ids: List[str]) -> int:
+    items = [str(rule_id) for rule_id in valid_rule_ids if str(rule_id)]
+    conn = get_connection()
+    cur = conn.cursor()
+    if items:
+        placeholders = ",".join("?" for _ in items)
+        cur.execute(f"DELETE FROM alert_rule_state WHERE rule_id NOT IN ({placeholders})", items)
+    else:
+        cur.execute("DELETE FROM alert_rule_state")
+    deleted = cur.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def apply_remote_alerts_config(
+    alerts_cfg: Dict[str, Any],
+    *,
+    revision: str,
+    desired_hash: str = "",
+    remote_endpoint: str = "",
+    status_endpoint: str = "",
+) -> Dict[str, Any]:
+    current = get_local_config()
+    rev = int(current.get("_rev", 0)) + 1
+    merged = deep_merge(current, {"alerts": alerts_cfg})
+    normalized = normalize_local_config(merged)
+    normalized["_rev"] = rev
+    normalized_alerts = normalize_alerts_config(normalized.get("alerts"))
+    applied_hash = desired_hash or alert_config_hash(normalized_alerts)
+    set_setting("config", json.dumps(normalized))
+    set_alert_config_state(
+        desired_revision=str(revision or ""),
+        applied_revision=str(revision or ""),
+        source="remote",
+        sync_status="in_sync",
+        applied_at=int(time.time()),
+        desired_hash=applied_hash,
+        applied_hash=applied_hash,
+        last_error="",
+        remote_endpoint=remote_endpoint,
+        status_endpoint=status_endpoint,
+    )
+    prune_alert_rule_states([str(rule.get("id") or "") for rule in normalized_alerts.get("rules", [])])
+    return get_alert_config_state()
 
 
 def get_remote_config_state() -> Dict[str, Any]:

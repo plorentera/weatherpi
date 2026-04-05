@@ -7,14 +7,18 @@ from urllib.parse import urljoin
 
 import httpx
 
+from common.alerts import alert_config_hash, normalize_alerts_config, validate_alerts_config
 from common.config import sanitize_remote_overlay
 from common.config import SECRETS_PATH
 from common.db import (
+    apply_remote_alerts_config,
     clear_remote_overlay,
     delete_setting,
+    get_alert_config_state,
     get_config,
     get_remote_config_state,
     get_setting,
+    set_alert_config_state,
     set_remote_config_state,
     set_remote_overlay,
     set_setting,
@@ -53,6 +57,83 @@ def _fetch_json_document(
     if not isinstance(payload, dict):
         raise RuntimeError("remote config endpoint must return a JSON object")
     return payload, body_bytes
+
+
+def _post_json_document(
+    *,
+    url: str,
+    station_id: str,
+    auth_cfg: Dict[str, Any],
+    tls_cfg: Dict[str, Any],
+    secrets_bundle: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> int:
+    body_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    headers = build_http_auth_headers(
+        auth_cfg=auth_cfg,
+        secret_bundle=secrets_bundle,
+        station_id=station_id,
+        method="POST",
+        url=url,
+        body_bytes=body_bytes,
+        idempotency_key="",
+    )
+    headers["Content-Type"] = "application/json"
+    with httpx.Client(timeout=30, verify=_get_verify_value(tls_cfg)) as client:
+        response = client.post(url, content=body_bytes, headers=headers)
+        response.raise_for_status()
+        return response.status_code
+
+
+def _alerts_remote_payload(manifest: Dict[str, Any]) -> tuple[Dict[str, Any] | None, str, str]:
+    raw = manifest.get("alerts")
+    if not isinstance(raw, dict):
+        return None, "", ""
+
+    if isinstance(raw.get("config"), dict):
+        payload = raw.get("config")
+    else:
+        payload = {key: value for key, value in raw.items() if key not in {"revision", "status_url", "report_url"}}
+
+    if not isinstance(payload, dict):
+        return None, "", ""
+
+    revision = str(raw.get("revision") or manifest.get("revision") or manifest.get("config_revision") or "")
+    status_url = str(raw.get("status_url") or raw.get("report_url") or "").strip()
+    return payload, revision, status_url
+
+
+def _report_alert_sync_status(
+    *,
+    station_id: str,
+    remote_cfg: Dict[str, Any],
+    secrets_bundle: Dict[str, Any],
+    status_url: str,
+) -> None:
+    if not status_url:
+        return
+
+    state = get_alert_config_state()
+    payload = {
+        "station_id": station_id,
+        "desired_revision": state.get("desired_revision"),
+        "applied_revision": state.get("applied_revision"),
+        "sync_status": state.get("sync_status"),
+        "last_change_source": state.get("source"),
+        "config_hash": state.get("applied_hash"),
+        "desired_hash": state.get("desired_hash"),
+        "last_error": state.get("last_error"),
+        "reported_at": int(time.time()),
+    }
+    _post_json_document(
+        url=status_url,
+        station_id=station_id,
+        auth_cfg=remote_cfg.get("auth", {}),
+        tls_cfg=remote_cfg.get("tls", {}),
+        secrets_bundle=secrets_bundle,
+        payload=payload,
+    )
+    set_alert_config_state(last_report_ts=int(time.time()), status_endpoint=status_url)
 
 
 def apply_staged_remote_config() -> Dict[str, Any]:
@@ -114,8 +195,20 @@ def run_remote_config_check(force: bool = False) -> Dict[str, Any]:
         revision = str(manifest.get("revision") or manifest.get("config_revision") or "")
         if not revision:
             raise RuntimeError("remote config manifest is missing revision")
-        if not force and revision == str(current_state.get("current_revision") or ""):
-            return set_remote_config_state(
+        remote_alert_state = get_alert_config_state()
+        status_url = str(remote_alert_state.get("status_endpoint") or "").strip()
+        alerts_payload, alerts_revision, manifest_status_url = _alerts_remote_payload(manifest)
+        if manifest_status_url:
+            status_url = manifest_status_url
+        known_alert_revision = str(
+            remote_alert_state.get("desired_revision")
+            or remote_alert_state.get("applied_revision")
+            or ""
+        )
+        alert_revision_changed = bool(alerts_payload is not None and str(alerts_revision or revision) != known_alert_revision)
+
+        if not force and revision == str(current_state.get("current_revision") or "") and not alert_revision_changed:
+            state = set_remote_config_state(
                 status="idle",
                 endpoint=endpoint,
                 last_error="",
@@ -123,6 +216,22 @@ def run_remote_config_check(force: bool = False) -> Dict[str, Any]:
                 current_revision=revision,
                 last_check_ts=now_ts,
             )
+            set_alert_config_state(
+                last_remote_check_ts=now_ts,
+                remote_endpoint=endpoint,
+                status_endpoint=status_url,
+            )
+            if status_url:
+                try:
+                    _report_alert_sync_status(
+                        station_id=station_id,
+                        remote_cfg=remote_cfg,
+                        secrets_bundle=secrets_bundle,
+                        status_url=status_url,
+                    )
+                except Exception as report_exc:
+                    set_alert_config_state(last_error=f"report failed: {report_exc}", status_endpoint=status_url)
+            return state
 
         if "config" in manifest:
             payload = manifest["config"]
@@ -130,14 +239,16 @@ def run_remote_config_check(force: bool = False) -> Dict[str, Any]:
         else:
             config_url = str(manifest.get("config_url") or "").strip()
             if not config_url:
-                raise RuntimeError("remote config manifest requires config or config_url")
-            payload, payload_bytes = _fetch_json_document(
-                url=urljoin(endpoint, config_url),
-                station_id=station_id,
-                auth_cfg=remote_cfg.get("auth", {}),
-                tls_cfg=remote_cfg.get("tls", {}),
-                secrets_bundle=secrets_bundle,
-            )
+                payload = {}
+                payload_bytes = b"{}"
+            else:
+                payload, payload_bytes = _fetch_json_document(
+                    url=urljoin(endpoint, config_url),
+                    station_id=station_id,
+                    auth_cfg=remote_cfg.get("auth", {}),
+                    tls_cfg=remote_cfg.get("tls", {}),
+                    secrets_bundle=secrets_bundle,
+                )
 
         if not isinstance(payload, dict):
             raise RuntimeError("remote config payload must be a JSON object")
@@ -176,6 +287,54 @@ def run_remote_config_check(force: bool = False) -> Dict[str, Any]:
             last_check_ts=now_ts,
         )
 
+        if alerts_payload is not None:
+            alerts_error = validate_alerts_config(alerts_payload)
+            desired_hash = alert_config_hash(alerts_payload)
+            set_alert_config_state(
+                desired_revision=str(alerts_revision or revision),
+                desired_hash=desired_hash,
+                sync_status="applying_remote",
+                last_error="",
+                last_remote_check_ts=now_ts,
+                remote_endpoint=endpoint,
+                status_endpoint=status_url,
+            )
+            if alerts_error:
+                set_alert_config_state(
+                    sync_status="apply_failed",
+                    last_error=alerts_error,
+                    last_remote_check_ts=now_ts,
+                    remote_endpoint=endpoint,
+                    status_endpoint=status_url,
+                )
+                raise RuntimeError(alerts_error)
+
+            try:
+                apply_remote_alerts_config(
+                    normalize_alerts_config(alerts_payload),
+                    revision=str(alerts_revision or revision),
+                    desired_hash=desired_hash,
+                    remote_endpoint=endpoint,
+                    status_endpoint=status_url,
+                )
+            except Exception as alert_exc:
+                set_alert_config_state(
+                    desired_revision=str(alerts_revision or revision),
+                    desired_hash=desired_hash,
+                    sync_status="apply_failed",
+                    last_error=str(alert_exc),
+                    last_remote_check_ts=now_ts,
+                    remote_endpoint=endpoint,
+                    status_endpoint=status_url,
+                )
+                raise
+        else:
+            set_alert_config_state(
+                last_remote_check_ts=now_ts,
+                remote_endpoint=endpoint,
+                status_endpoint=status_url,
+            )
+
         if bool(remote_cfg.get("auto_apply", True)):
             set_remote_overlay(
                 sanitized,
@@ -187,7 +346,18 @@ def run_remote_config_check(force: bool = False) -> Dict[str, Any]:
                 last_error="",
             )
             delete_setting("remote_config_staged")
-        return get_remote_config_state()
+        state = get_remote_config_state()
+        if status_url:
+            try:
+                _report_alert_sync_status(
+                    station_id=station_id,
+                    remote_cfg=remote_cfg,
+                    secrets_bundle=secrets_bundle,
+                    status_url=status_url,
+                )
+            except Exception as report_exc:
+                set_alert_config_state(last_error=f"report failed: {report_exc}", status_endpoint=status_url)
+        return state
     except Exception as exc:
         return set_remote_config_state(
             status="failed",

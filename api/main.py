@@ -18,9 +18,17 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from common.alerts import (
+    ALERT_SOURCE_LABELS,
+    ALERT_SYNC_STATUS_LABELS,
+    alert_rule_options,
+    operator_options,
+    severity_options,
+)
 from common.config import APP_VERSION, deep_merge, normalize_local_config, resolve_api_bind_host, validate_local_config
 from common.db import (
     enqueue_delivery_item,
+    get_alert_config_state,
     fetch_latest,
     fetch_measurements_series,
     fetch_outbox,
@@ -29,6 +37,7 @@ from common.db import (
     get_connection,
     get_remote_config_state,
     get_update_state,
+    list_alert_rule_states,
     list_exports,
     list_release_history,
     outbox_summary,
@@ -396,6 +405,7 @@ def series(limit: int = 288):
 def read_config():
     bundle = get_config_bundle()
     bundle["secrets"] = build_public_secret_view()
+    bundle["alerts_state"] = get_alert_config_state()
     return bundle
 
 
@@ -411,6 +421,7 @@ def update_config(cfg: ConfigModel):
     set_config(payload)
     bundle = get_config_bundle()
     bundle["secrets"] = build_public_secret_view()
+    bundle["alerts_state"] = get_alert_config_state()
     return {"ok": True, **bundle}
 
 
@@ -497,6 +508,30 @@ def telemetry_status():
         "enabled": bool(telemetry.get("enabled", False)),
         "destinations": telemetry.get("destinations", []),
         "outbox": telemetry_delivery_summary(),
+    }
+
+
+@app.get("/api/alerts/status")
+def alerts_status():
+    bundle = get_config_bundle()
+    alerts_cfg = bundle["local_config"].get("alerts", {}) if isinstance(bundle.get("local_config"), dict) else {}
+    state = get_alert_config_state()
+    return {
+        "config": alerts_cfg,
+        "state": {
+            **state,
+            "source_label": ALERT_SOURCE_LABELS.get(str(state.get("source") or ""), str(state.get("source") or "-")),
+            "sync_status_label": ALERT_SYNC_STATUS_LABELS.get(
+                str(state.get("sync_status") or ""),
+                str(state.get("sync_status") or "-"),
+            ),
+        },
+        "rules": list_alert_rule_states(),
+        "catalog": {
+            "metrics": alert_rule_options(),
+            "operators": operator_options(),
+            "severities": severity_options(),
+        },
     }
 
 

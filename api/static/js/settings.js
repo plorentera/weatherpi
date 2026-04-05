@@ -4,10 +4,12 @@ const state = {
   bundle: null,
   publicSecrets: null,
   telemetryStatus: null,
+  alertsStatus: null,
   updateStatus: null,
   remoteConfigStatus: null,
   accessStatus: null,
   credentialsStatus: null,
+  alertRulesDraft: [],
 };
 
 function deepCopy(value) {
@@ -26,6 +28,15 @@ function pretty(value) {
   return JSON.stringify(value ?? {}, null, 2);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function asInt(value, fallback) {
   const parsed = parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -36,6 +47,16 @@ function formatTs(ts) {
   const date = new Date(Number(ts) * 1000);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString();
+}
+
+function humanAlertRuntimeStatus(status) {
+  const mapping = {
+    idle: "sin disparos",
+    fired: "disparada",
+    resolved: "recuperada",
+    disabled: "desactivada",
+  };
+  return mapping[String(status || "").trim()] || String(status || "-");
 }
 
 function setFeedback(text, tone = "secondary") {
@@ -183,6 +204,42 @@ function defaultDestination(kind = "webhook_https") {
   };
 }
 
+function defaultAlertRule(index = 0) {
+  return {
+    id: `alert-rule-${Date.now()}-${index + 1}`,
+    enabled: true,
+    name: "",
+    metric: "temperature_c",
+    operator: ">",
+    threshold: 38,
+    for_seconds: 300,
+    cooldown_seconds: 1800,
+    severity: "warning",
+    message_template: "",
+    source_scope: "",
+  };
+}
+
+function alertCatalog() {
+  return emptyObject(state.alertsStatus && state.alertsStatus.catalog);
+}
+
+function alertMetricOptions() {
+  return emptyArray(alertCatalog().metrics);
+}
+
+function alertOperatorOptions() {
+  return emptyArray(alertCatalog().operators);
+}
+
+function alertSeverityOptions() {
+  return emptyArray(alertCatalog().severities);
+}
+
+function currentAlertRules() {
+  return emptyArray(state.alertRulesDraft);
+}
+
 function pickPrimaryDestination(destinations) {
   const items = emptyArray(destinations);
   return items.length ? deepCopy(items[0]) : null;
@@ -281,6 +338,159 @@ function syncExportsPreview() {
   $("exportsSummary").textContent = $("exportsEnabled").checked
     ? `Los exports se generaran ${$("exFrequency").value === "daily" ? "a diario" : $("exFrequency").value === "weekly" ? "cada semana" : `cada ${asInt($("exEveryDays").value, 2)} dias`} a las ${$("exLocalTime").value || "01:00"}. ${uploadText}`
     : "Los CSV siguen disponibles bajo demanda, pero la programacion automatica esta desactivada.";
+}
+
+function syncAlertsPreview() {
+  const rules = currentAlertRules();
+  const enabledRules = rules.filter((rule) => !!rule.enabled);
+  const alertState = emptyObject(state.alertsStatus && state.alertsStatus.state);
+  $("alertsRulesBadge").textContent = enabledRules.length;
+  let text = $("alertsEnabled").checked
+    ? `Se evaluaran ${enabledRules.length} reglas locales con duracion minima y cooldown.`
+    : "Las reglas quedan guardadas, pero la evaluacion local de alertas esta desactivada.";
+  if (alertState.sync_status_label) {
+    text += ` Estado de sincronizacion: ${alertState.sync_status_label}.`;
+  }
+  if (alertState.last_error) {
+    text += ` Ultimo error: ${alertState.last_error}.`;
+  }
+  $("alertsSummary").textContent = text;
+}
+
+function updateAlertRule(index, field, value) {
+  const rules = currentAlertRules().map((rule) => deepCopy(rule));
+  const existing = emptyObject(rules[index]);
+  rules[index] = {
+    ...existing,
+    [field]: value,
+  };
+  state.alertRulesDraft = rules;
+  syncAlertsPreview();
+}
+
+function removeAlertRule(index) {
+  const rules = currentAlertRules().map((rule) => deepCopy(rule));
+  rules.splice(index, 1);
+  state.alertRulesDraft = rules;
+  renderAlertRulesList();
+  syncAlertsPreview();
+}
+
+function renderAlertRulesList() {
+  const list = $("alertsRulesList");
+  const empty = $("alertsRulesEmpty");
+  const rules = currentAlertRules();
+  const runtimeStates = emptyArray(state.alertsStatus && state.alertsStatus.rules);
+  const runtimeById = Object.fromEntries(runtimeStates.map((item) => [item.rule_id, item]));
+  list.innerHTML = "";
+  empty.classList.toggle("d-none", rules.length > 0);
+  if (!rules.length) return;
+
+  const metricOptionsHtml = alertMetricOptions().map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join("");
+  const operatorOptionsHtml = alertOperatorOptions().map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join("");
+  const severityOptionsHtml = alertSeverityOptions().map((option) => (
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  )).join("");
+
+  rules.forEach((rule, index) => {
+    const runtime = emptyObject(runtimeById[rule.id]);
+    const runtimeBadge = runtime.active
+      ? '<span class="badge text-bg-warning">Activa ahora</span>'
+      : '<span class="badge text-bg-light border">Normal</span>';
+    const runtimeDetail = runtime.last_status
+      ? `${humanAlertRuntimeStatus(runtime.last_status)}${runtime.last_value !== undefined && runtime.last_value !== null ? ` - valor ${runtime.last_value}` : ""}${runtime.last_fired_ts ? ` - ultimo disparo ${formatTs(runtime.last_fired_ts)}` : ""}`
+      : "Sin evaluaciones recientes";
+    const wrapper = document.createElement("div");
+    wrapper.className = "card border";
+    wrapper.innerHTML = `
+      <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
+          <div>
+            <div class="fw-semibold">${escapeHtml(rule.name || `Regla ${index + 1}`)}</div>
+            <div class="small text-secondary">${escapeHtml(rule.id || "-")} - ${escapeHtml(runtimeDetail)}</div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            ${runtimeBadge}
+            <div class="form-check form-switch m-0">
+              <input class="form-check-input" type="checkbox" data-field="enabled" ${rule.enabled ? "checked" : ""}>
+              <label class="form-check-label small">Activa</label>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-action="remove">Eliminar</button>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Nombre</label>
+            <input type="text" class="form-control" data-field="name" value="${escapeHtml(rule.name || "")}" placeholder="Temperatura alta">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Metrica</label>
+            <select class="form-select" data-field="metric">${metricOptionsHtml}</select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Operador</label>
+            <select class="form-select" data-field="operator">${operatorOptionsHtml}</select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Umbral</label>
+            <input type="number" step="any" class="form-control" data-field="threshold" value="${escapeHtml(rule.threshold)}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Duracion minima (s)</label>
+            <input type="number" min="0" class="form-control" data-field="for_seconds" value="${escapeHtml(rule.for_seconds)}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Cooldown (s)</label>
+            <input type="number" min="0" class="form-control" data-field="cooldown_seconds" value="${escapeHtml(rule.cooldown_seconds)}">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Severidad</label>
+            <select class="form-select" data-field="severity">${severityOptionsHtml}</select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Origen opcional</label>
+            <input type="text" class="form-control" data-field="source_scope" value="${escapeHtml(rule.source_scope || "")}" placeholder="sensor-exterior">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Mensaje opcional</label>
+            <input type="text" class="form-control" data-field="message_template" value="${escapeHtml(rule.message_template || "")}" placeholder="Ejemplo: Temperatura alta en {current_value} C">
+          </div>
+        </div>
+      </div>
+    `;
+
+    wrapper.querySelector('[data-field="metric"]').value = rule.metric || "temperature_c";
+    wrapper.querySelector('[data-field="operator"]').value = rule.operator || ">";
+    wrapper.querySelector('[data-field="severity"]').value = rule.severity || "warning";
+
+    wrapper.querySelectorAll("[data-field]").forEach((input) => {
+      const field = input.getAttribute("data-field");
+      const eventName = input.tagName === "SELECT" || input.type === "checkbox" ? "change" : "input";
+      input.addEventListener(eventName, () => {
+        let value;
+        if (input.type === "checkbox") {
+          value = input.checked;
+        } else if (["threshold", "for_seconds", "cooldown_seconds"].includes(field)) {
+          value = Number.parseFloat(input.value);
+          if (!Number.isFinite(value)) {
+            value = field === "threshold" ? 0 : 0;
+          }
+          if (field !== "threshold") value = Math.max(0, Math.round(value));
+        } else {
+          value = input.value;
+        }
+        updateAlertRule(index, field, value);
+      });
+    });
+
+    wrapper.querySelector('[data-action="remove"]').addEventListener("click", () => removeAlertRule(index));
+    list.appendChild(wrapper);
+  });
 }
 
 function renderAccessStatus() {
@@ -405,6 +615,24 @@ function renderDelivery() {
   syncConditionalFields();
 }
 
+function renderAlerts() {
+  const status = emptyObject(state.alertsStatus);
+  const config = emptyObject(status.config);
+  const sync = emptyObject(status.state);
+  const rules = emptyArray(config.rules);
+
+  $("alertsEnabled").checked = !!config.enabled;
+  state.alertRulesDraft = deepCopy(rules);
+  $("alertsSource").textContent = sync.source_label || sync.source || "-";
+  $("alertsSyncStatus").textContent = sync.sync_status_label || sync.sync_status || "-";
+  $("alertsDesiredRevision").textContent = sync.desired_revision || "-";
+  $("alertsAppliedRevision").textContent = sync.applied_revision || "-";
+  $("alertsAppliedAt").textContent = formatTs(sync.applied_at);
+  $("alertsLastError").textContent = sync.last_error || "-";
+  renderAlertRulesList();
+  syncAlertsPreview();
+}
+
 function renderRemoteConfig() {
   const local = emptyObject(state.bundle && state.bundle.local_config);
   const cfg = emptyObject(local.remote_config);
@@ -484,7 +712,9 @@ function renderExports() {
 function renderAdvanced() {
   const local = emptyObject(state.bundle && state.bundle.local_config);
   const telemetry = emptyObject(local.telemetry);
+  const alerts = emptyObject(local.alerts);
   $("advancedDestinations").value = pretty(telemetry.destinations || []);
+  $("advancedAlertsRules").value = pretty(alerts.rules || []);
   $("advancedLocalConfig").value = pretty(local);
   $("secretSummary").textContent = pretty(state.publicSecrets || {});
   $("effectiveSummary").textContent = pretty((state.bundle && state.bundle.config) || {});
@@ -494,9 +724,10 @@ function renderAdvanced() {
 }
 
 async function refreshPage() {
-  const [bundle, telemetryStatus, updateStatus, remoteConfigStatus, accessStatus, credentialsStatus] = await Promise.all([
+  const [bundle, telemetryStatus, alertsStatus, updateStatus, remoteConfigStatus, accessStatus, credentialsStatus] = await Promise.all([
     fetchJson("/api/config", { cache: "no-store" }),
     fetchJson("/api/telemetry/status", { cache: "no-store" }),
+    fetchJson("/api/alerts/status", { cache: "no-store" }),
     fetchJson("/api/update/status", { cache: "no-store" }),
     fetchJson("/api/remote-config/status", { cache: "no-store" }),
     fetchJson("/api/system/access", { cache: "no-store" }),
@@ -506,6 +737,7 @@ async function refreshPage() {
   state.bundle = bundle;
   state.publicSecrets = bundle.secrets || {};
   state.telemetryStatus = telemetryStatus;
+  state.alertsStatus = alertsStatus;
   state.updateStatus = updateStatus;
   state.remoteConfigStatus = remoteConfigStatus;
   state.accessStatus = accessStatus;
@@ -514,6 +746,7 @@ async function refreshPage() {
   renderGeneral();
   renderAccessStatus();
   renderDelivery();
+  renderAlerts();
   renderRemoteConfig();
   renderUpdates();
   renderCredentialsStatus();
@@ -586,6 +819,22 @@ function buildMainConfigPayload() {
   }
 
   payload.telemetry.destinations = [primary, ...deepCopy(currentDestinations.slice(1))];
+
+  payload.alerts = emptyObject(payload.alerts);
+  payload.alerts.enabled = $("alertsEnabled").checked;
+  payload.alerts.rules = currentAlertRules().map((rule, index) => ({
+    id: String(rule.id || `alert-rule-${index + 1}`).trim() || `alert-rule-${index + 1}`,
+    enabled: !!rule.enabled,
+    name: String(rule.name || `Regla ${index + 1}`).trim() || `Regla ${index + 1}`,
+    metric: String(rule.metric || "temperature_c"),
+    operator: String(rule.operator || ">"),
+    threshold: Number.isFinite(Number(rule.threshold)) ? Number(rule.threshold) : 0,
+    for_seconds: Math.max(0, asInt(rule.for_seconds, 0)),
+    cooldown_seconds: Math.max(0, asInt(rule.cooldown_seconds, 1800)),
+    severity: String(rule.severity || "warning"),
+    message_template: String(rule.message_template || ""),
+    source_scope: String(rule.source_scope || ""),
+  }));
 
   payload.remote_config = emptyObject(payload.remote_config);
   payload.remote_config.enabled = $("remoteConfigEnabled").checked;
@@ -756,6 +1005,24 @@ async function saveAdvancedDestinations() {
   setFeedback("Destinos avanzados guardados.", "success");
 }
 
+async function saveAdvancedAlertRules() {
+  const rules = parseJsonArea("advancedAlertsRules", []);
+  if (!Array.isArray(rules)) {
+    throw new Error("Reglas de alertas JSON debe ser un array.");
+  }
+  const payload = deepCopy(state.bundle && state.bundle.local_config) || {};
+  payload.alerts = emptyObject(payload.alerts);
+  payload.alerts.rules = rules;
+  payload.alerts.enabled = !!payload.alerts.enabled || rules.some((item) => !!(item && item.enabled));
+  await fetchJson("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  await refreshPage();
+  setFeedback("Alertas avanzadas guardadas.", "success");
+}
+
 async function saveAdvancedSecrets() {
   const patch = parseJsonArea("advancedSecretPatch", {});
   await fetchJson("/api/config/secrets", {
@@ -799,6 +1066,8 @@ function wireInputs() {
       syncDeliveryPreview();
     });
   });
+
+  $("alertsEnabled").addEventListener("change", syncAlertsPreview);
 
   ["accessLocalOnly", "accessLan"].forEach((id) => {
     $(id).addEventListener("change", syncAccessSelectionPreview);
@@ -860,6 +1129,14 @@ $("saveDestinationsBtn").addEventListener("click", () => {
     .finally(() => setButtonGroupState(["saveDestinationsBtn"], false, "Guardando...", "Guardar destinos"));
 });
 
+$("saveAlertRulesBtn").addEventListener("click", () => {
+  fetchStarted("Guardando alertas avanzadas...");
+  setButtonGroupState(["saveAlertRulesBtn"], true, "Guardando...", "Guardar alertas");
+  saveAdvancedAlertRules()
+    .catch((err) => setFeedback(`No se pudieron guardar las alertas. ${err.message}`, "danger"))
+    .finally(() => setButtonGroupState(["saveAlertRulesBtn"], false, "Guardando...", "Guardar alertas"));
+});
+
 $("saveSecretsBtn").addEventListener("click", () => {
   fetchStarted("Guardando secrets...");
   setButtonGroupState(["saveSecretsBtn"], true, "Guardando...", "Guardar secrets");
@@ -886,6 +1163,14 @@ $("applyUpdateBtn").addEventListener("click", () => {
 $("rollbackUpdateBtn").addEventListener("click", () => {
   runAction("rollbackUpdateBtn", "/api/update/rollback", "Volver a la version anterior", "Volviendo...", "Se ha solicitado volver a la version anterior.")
     .catch((err) => setFeedback(`No se pudo volver a la version anterior. ${err.message}`, "danger"));
+});
+
+$("addAlertRuleBtn").addEventListener("click", () => {
+  const rules = currentAlertRules().map((rule) => deepCopy(rule));
+  rules.push(defaultAlertRule(rules.length));
+  state.alertRulesDraft = rules;
+  renderAlertRulesList();
+  syncAlertsPreview();
 });
 
 wireInputs();

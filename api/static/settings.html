@@ -194,7 +194,7 @@
                   </div>
                   <div class="form-check">
                     <input id="dataAlerts" class="form-check-input" type="checkbox">
-                    <label class="form-check-label" for="dataAlerts">Alertas</label>
+                    <label class="form-check-label" for="dataAlerts">Alertas de sensores y del sistema</label>
                   </div>
                 </div>
 
@@ -240,6 +240,59 @@
 
                 <div class="col-12">
                   <div class="alert alert-light border mb-0" id="deliverySummary">Sin configuracion de envio activa.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="col-12 col-xl-6">
+          <section class="card shadow-sm h-100">
+            <div class="card-body p-4">
+              <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                <div>
+                  <div class="text-uppercase text-secondary small fw-semibold mb-2">Alertas</div>
+                  <h2 class="h4 mb-1">Alertas simples de sensores y sistema</h2>
+                  <p class="text-secondary small mb-0">Se evaluan en la estacion y se mantienen operativas aunque falle Internet.</p>
+                </div>
+                <div class="text-end">
+                  <div class="form-check form-switch">
+                    <input id="alertsEnabled" class="form-check-input" type="checkbox" role="switch">
+                    <label class="form-check-label fw-semibold" for="alertsEnabled">Activar alertas</label>
+                  </div>
+                  <div class="small text-secondary mt-2">Reglas activas: <span id="alertsRulesBadge">0</span></div>
+                </div>
+              </div>
+
+              <div class="row g-3">
+                <div class="col-12">
+                  <div id="alertsSummary" class="alert alert-light border mb-0">
+                    Las alertas locales se disparan con duracion minima, cooldown y recuperacion.
+                  </div>
+                </div>
+                <div class="col-12">
+                  <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                      <tbody>
+                        <tr><th class="text-secondary fw-normal">Origen del ultimo cambio</th><td id="alertsSource">-</td></tr>
+                        <tr><th class="text-secondary fw-normal">Estado de sincronizacion</th><td id="alertsSyncStatus">-</td></tr>
+                        <tr><th class="text-secondary fw-normal">Revision deseada</th><td id="alertsDesiredRevision">-</td></tr>
+                        <tr><th class="text-secondary fw-normal">Revision aplicada</th><td id="alertsAppliedRevision">-</td></tr>
+                        <tr><th class="text-secondary fw-normal">Aplicada en</th><td id="alertsAppliedAt">-</td></tr>
+                        <tr><th class="text-secondary fw-normal">Ultimo error</th><td id="alertsLastError">-</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                  <button id="addAlertRuleBtn" type="button" class="btn btn-outline-secondary">Anadir regla</button>
+                  <span class="small text-secondary">Puedes crear reglas sencillas sin editar JSON.</span>
+                </div>
+                <div class="col-12">
+                  <div id="alertsRulesEmpty" class="alert alert-secondary mb-0 d-none">
+                    Todavia no hay reglas. Puedes empezar con temperatura alta, humedad baja o ausencia de lecturas.
+                  </div>
+                  <div id="alertsRulesList" class="vstack gap-3"></div>
                 </div>
               </div>
             </div>
@@ -470,6 +523,19 @@
               <div id="advancedSettingsPane" class="accordion-collapse collapse" data-bs-parent="#advancedAccordion">
                 <div class="accordion-body">
                   <div class="row g-4">
+                    <div class="col-12 col-xxl-6">
+                      <div class="card border">
+                        <div class="card-body">
+                          <div class="d-flex justify-content-between align-items-center gap-3 mb-2">
+                            <div class="fw-semibold">Reglas de alertas JSON</div>
+                            <button id="saveAlertRulesBtn" type="button" class="btn btn-sm btn-outline-secondary">Guardar alertas</button>
+                          </div>
+                          <p class="small text-secondary">Editor opcional para reglas avanzadas y debugging local.</p>
+                          <textarea id="advancedAlertsRules" class="form-control font-monospace" rows="12"></textarea>
+                        </div>
+                      </div>
+                    </div>
+
                     <div class="col-12 col-xxl-6">
                       <div class="card border">
                         <div class="card-body">

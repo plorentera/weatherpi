@@ -12,6 +12,7 @@ class ConfigModel(BaseModel):
     sample_interval_seconds: int = 5
     collector: Dict[str, Any] = Field(default_factory=dict)
     telemetry: Dict[str, Any] = Field(default_factory=dict)
+    alerts: Dict[str, Any] = Field(default_factory=dict)
     remote_config: Dict[str, Any] = Field(default_factory=dict)
     updates: Dict[str, Any] = Field(default_factory=dict)
     security: Dict[str, Any] = Field(default_factory=dict)

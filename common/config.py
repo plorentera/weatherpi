@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 from urllib.parse import urlparse
 
+from common.alerts import normalize_alerts_config, validate_alerts_config
+
 
 BASE_DIR = Path(os.getenv("WEATHERPI_BASE_DIR", str(Path(__file__).resolve().parent.parent))).resolve()
 DATA_DIR = Path(os.getenv("WEATHERPI_DATA_DIR", str(BASE_DIR / "data"))).resolve()
@@ -46,6 +48,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "enabled": False,
         "schema_version": TELEMETRY_SCHEMA_VERSION,
         "destinations": [],
+    },
+    "alerts": {
+        "enabled": False,
+        "rules": [],
     },
     "remote_config": {
         "enabled": False,
@@ -334,6 +340,7 @@ def normalize_local_config(local_cfg: Dict[str, Any] | None) -> Dict[str, Any]:
     normalized = deep_merge(DEFAULT_CONFIG, cfg)
     normalized["collector"] = deep_merge(DEFAULT_CONFIG["collector"], normalized.get("collector", {}))
     normalized["telemetry"] = deep_merge(DEFAULT_CONFIG["telemetry"], normalized.get("telemetry", {}))
+    normalized["alerts"] = deep_merge(DEFAULT_CONFIG["alerts"], normalized.get("alerts", {}))
     normalized["remote_config"] = deep_merge(DEFAULT_CONFIG["remote_config"], normalized.get("remote_config", {}))
     normalized["updates"] = deep_merge(DEFAULT_CONFIG["updates"], normalized.get("updates", {}))
     normalized["security"] = deep_merge(DEFAULT_CONFIG["security"], normalized.get("security", {}))
@@ -359,6 +366,7 @@ def normalize_local_config(local_cfg: Dict[str, Any] | None) -> Dict[str, Any]:
     normalized["telemetry"]["destinations"] = [
         normalize_destination(item, index=index) for index, item in enumerate(destinations)
     ]
+    normalized["alerts"] = normalize_alerts_config(normalized.get("alerts"))
     normalized["remote_config"]["enabled"] = bool(normalized["remote_config"].get("enabled", False))
     normalized["remote_config"]["poll_interval_seconds"] = max(
         60, min(int(normalized["remote_config"].get("poll_interval_seconds", 900)), 86400)
@@ -435,6 +443,8 @@ def sanitize_localish_config(partial: Dict[str, Any]) -> Dict[str, Any]:
         destinations = merged["telemetry"].get("destinations")
         if isinstance(destinations, list):
             merged["telemetry"]["destinations"] = [normalize_destination(item, index=i) for i, item in enumerate(destinations)]
+    if "alerts" in merged:
+        merged["alerts"] = normalize_alerts_config(merged.get("alerts"))
     return merged
 
 
@@ -535,6 +545,10 @@ def validate_local_config(cfg: Dict[str, Any]) -> str | None:
             return "updates.manifest_url es obligatorio cuando updates.enabled=true"
         if not is_remote_https_or_loopback_http(manifest_url):
             return "updates.manifest_url debe ser https:// o http:// loopback"
+
+    alerts_error = validate_alerts_config(normalized.get("alerts"))
+    if alerts_error:
+        return alerts_error
 
     return None
 
