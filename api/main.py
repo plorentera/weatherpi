@@ -1,8 +1,10 @@
 import time
+import os
+import logging
 from html import escape
 from pathlib import Path
 from urllib.parse import urlparse
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, PlainTextResponse, JSONResponse
 
@@ -35,6 +37,9 @@ app = FastAPI(
 )
 static_dir = Path(__file__).resolve().parent / "static"
 docs_dir = Path(__file__).resolve().parent.parent / "docs"
+logger = logging.getLogger("weatherpi.api")
+API_KEY_ENV_NAME = "WEATHERPI_API_KEY"
+API_KEY = os.getenv(API_KEY_ENV_NAME, "").strip()
 
 
 @app.get("/api/status")
@@ -67,6 +72,18 @@ def latest():
 def series(limit: int = 288):
     limit = max(10, min(limit, 2000))
     return {"items": fetch_measurements_series(limit=limit)}
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    # If API key is not configured, keep local/dev flow simple.
+    if not API_KEY:
+        return
+
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="missing X-API-Key")
+
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="invalid API key")
 
 
 class ConfigModel(BaseModel):
@@ -125,7 +142,7 @@ def read_config():
 
 
 @app.put("/api/config")
-def update_config(cfg: ConfigModel):
+def update_config(cfg: ConfigModel, _: None = Depends(require_api_key)):
     error = _validate_config_payload(cfg)
     if error:
         return JSONResponse(status_code=400, content={"ok": False, "error": error})
@@ -144,13 +161,13 @@ def api_outbox(status: Optional[str] = None, limit: int = 100):
 
 
 @app.post("/api/outbox/retry_failed")
-def retry_failed():
+def retry_failed(_: None = Depends(require_api_key)):
     n = retry_failed_outbox(int(time.time()))
     return {"ok": True, "retried": n}
 
 
 @app.post("/api/outbox/purge_sent")
-def purge_sent(keep_last: int = 1000):
+def purge_sent(keep_last: int = 1000, _: None = Depends(require_api_key)):
     deleted = purge_sent_outbox(keep_last=keep_last)
     return {"ok": True, "deleted": deleted, "keep_last": keep_last}
 
@@ -248,3 +265,11 @@ def api_markdown_doc(raw: bool = False):
 
 
 app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+
+
+@app.on_event("startup")
+def startup_notice() -> None:
+    if API_KEY:
+        logger.info("API write protection enabled via %s", API_KEY_ENV_NAME)
+    else:
+        logger.warning("API write protection disabled (set %s to enable)", API_KEY_ENV_NAME)

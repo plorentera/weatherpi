@@ -16,6 +16,8 @@ http://127.0.0.1:8000
 ## Convenciones
 
 - API sin autenticacion por defecto (entorno local).
+- Puedes activar proteccion de escritura configurando la variable de entorno `WEATHERPI_API_KEY`.
+- Con proteccion activa, los endpoints de escritura requieren cabecera `X-API-Key`.
 - Respuestas de negocio en JSON (`application/json`).
 - Endpoints de export devuelven CSV (`text/csv`).
 - Timestamps en formato epoch (segundos UTC).
@@ -203,6 +205,11 @@ Respuesta 200:
 
 Actualiza configuracion.
 
+Si `WEATHERPI_API_KEY` esta activa en el servidor:
+
+- sin `X-API-Key` -> `401`.
+- con key incorrecta -> `403`.
+
 Reglas de validacion de API:
 
 - `sample_interval_seconds` debe estar entre `1` y `3600`.
@@ -214,6 +221,7 @@ Reglas de validacion de API:
 ```bash
 curl -X PUT http://127.0.0.1:8000/api/config \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: tu_clave_si_esta_activada" \
   -d '{
     "station_id": "meteo-casa",
     "sample_interval_seconds": 10,
@@ -308,7 +316,8 @@ Respuesta 200:
 Reencola todos los registros en `failed` a `pending`.
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/outbox/retry_failed
+curl -X POST http://127.0.0.1:8000/api/outbox/retry_failed \
+  -H "X-API-Key: tu_clave_si_esta_activada"
 ```
 
 Respuesta 200:
@@ -329,7 +338,8 @@ Query params:
 - `keep_last` (opcional, default `1000`).
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/outbox/purge_sent?keep_last=500"
+curl -X POST "http://127.0.0.1:8000/api/outbox/purge_sent?keep_last=500" \
+  -H "X-API-Key: tu_clave_si_esta_activada"
 ```
 
 Respuesta 200:

@@ -23,7 +23,7 @@ Recoger mediciones ambientales, visualizarlas en un dashboard web, y gestionar s
 
 ### Fuera de alcance por ahora
 
-- Autenticacion/autorizacion de API.
+- Autenticacion/autorizacion avanzada (usuarios, roles, tokens).
 - Observabilidad completa (metricas Prometheus, tracing, alerting).
 - Drivers de sensores reales y calibracion metrologica formal.
 - CI/CD y cobertura de tests completa.
@@ -165,6 +165,30 @@ Validaciones relevantes (`PUT /api/config`):
 
 - Webhook habilitado requiere URL HTTP(S) valida.
 - MQTT habilitado requiere `host`, `topic` y `port` en rango 1..65535.
+
+## Seguridad de escritura (opcional)
+
+Puedes proteger endpoints de escritura mediante API key.
+
+1. Define variable de entorno en el servidor:
+
+```powershell
+$env:WEATHERPI_API_KEY = "tu_clave"
+python -m scripts.run_all
+```
+
+2. Endpoints protegidos cuando esta activa:
+
+- `PUT /api/config`
+- `POST /api/outbox/retry_failed`
+- `POST /api/outbox/purge_sent`
+
+3. Codigos de respuesta esperados:
+
+- `401` si falta `X-API-Key`.
+- `403` si `X-API-Key` es incorrecta.
+
+La UI de configuracion (`/settings.html`) permite guardar la clave en el navegador (localStorage) para usarla en acciones protegidas.
 
 ## Librerias en local
 

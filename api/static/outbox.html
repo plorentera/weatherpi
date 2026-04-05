@@ -98,6 +98,7 @@
   <script src="/vendor/bootstrap/bootstrap.bundle.min.js"></script>
   <script>
     const MAX_ATTEMPTS = 10;
+    const API_KEY_STORAGE_KEY = "weatherpi.apiKey";
 
     function fmtTs(epochSeconds) {
       if (!epochSeconds) return "--";
@@ -110,6 +111,13 @@
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;");
+    }
+
+    function apiHeaders() {
+      const headers = {};
+      const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) || "";
+      if (apiKey) headers["X-API-Key"] = apiKey;
+      return headers;
     }
 
     async function load() {
@@ -151,17 +159,27 @@
 
     document.getElementById("retryBtn").addEventListener("click", async () => {
       document.getElementById("msg").textContent = "reintentando…";
-      const res = await fetch("/api/outbox/retry_failed", { method: "POST" });
+      const res = await fetch("/api/outbox/retry_failed", { method: "POST", headers: apiHeaders() });
       const data = await res.json();
-      document.getElementById("msg").textContent = `reintentados: ${data.retried}`;
+      if (res.ok && data.ok) {
+        document.getElementById("msg").textContent = `reintentados: ${data.retried}`;
+      } else {
+        const err = data.detail || data.error || `HTTP ${res.status}`;
+        document.getElementById("msg").textContent = `error: ${err}`;
+      }
       load();
     });
 
     document.getElementById("purgeBtn").addEventListener("click", async () => {
       document.getElementById("msg").textContent = "purgando sent…";
-      const res = await fetch("/api/outbox/purge_sent?keep_last=1000", { method: "POST" });
+      const res = await fetch("/api/outbox/purge_sent?keep_last=1000", { method: "POST", headers: apiHeaders() });
       const data = await res.json();
-      document.getElementById("msg").textContent = `borrados: ${data.deleted} (keep_last=${data.keep_last})`;
+      if (res.ok && data.ok) {
+        document.getElementById("msg").textContent = `borrados: ${data.deleted} (keep_last=${data.keep_last})`;
+      } else {
+        const err = data.detail || data.error || `HTTP ${res.status}`;
+        document.getElementById("msg").textContent = `error: ${err}`;
+      }
       load();
     });
 
