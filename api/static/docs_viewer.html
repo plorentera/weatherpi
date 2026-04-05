@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Documentacion API de Meteo Station" />
+  <title>API - Meteo Station</title>
+  <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .doc-shell { max-width: 1100px; }
+    .doc-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+  </style>
+</head>
+<body class="bg-body-tertiary">
+  <main class="container doc-shell py-4 py-lg-5">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+      <div>
+        <div class="text-uppercase text-secondary small fw-semibold mb-2">Documentacion consultable</div>
+        <h1 class="h3 fw-semibold mb-0">docs/API.md</h1>
+      </div>
+      <a class="btn btn-outline-secondary" href="/docs/API.md?raw=1" target="_blank" rel="noreferrer">Abrir raw</a>
+    </div>
+
+    <section class="card shadow-sm">
+      <div id="docBody" class="card-body p-4 p-lg-5 doc-body">Cargando documentacion...</div>
+    </section>
+  </main>
+
+  <script>
+    (async function () {
+      const target = document.getElementById("docBody");
+      try {
+        const res = await fetch("/docs/API.md?raw=1", { cache: "no-store" });
+        if (!res.ok) {
+          target.textContent = "No se pudo cargar la documentacion (HTTP " + res.status + ").";
+          return;
+        }
+        target.textContent = await res.text();
+      } catch (err) {
+        target.textContent = "No se pudo cargar la documentacion.";
+      }
+    })();
+  </script>
+</body>
+</html>

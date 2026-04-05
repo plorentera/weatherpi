@@ -140,8 +140,26 @@ Variables de entorno (opcionales, con defaults):
 
 - `WEATHERPI_READER_USER` (default: `reader`)
 - `WEATHERPI_READER_PASS` (default: `reader`)
+- `WEATHERPI_READER_PASS_HASH` (opcional, recomendado en produccion)
 - `WEATHERPI_ADMIN_USER` (default: `admin`)
 - `WEATHERPI_ADMIN_PASS` (default: `admin`)
+- `WEATHERPI_ADMIN_PASS_HASH` (opcional, recomendado en produccion)
+- `WEATHERPI_SESSION_SECRET` (recomendado >= 32 chars)
+- `WEATHERPI_COOKIE_SECURE` (`1` en HTTPS)
+- `WEATHERPI_COOKIE_SAMESITE` (`lax`, `strict` o `none`)
+- `WEATHERPI_SESSION_TTL_SECONDS` (300..604800)
+
+Si defines `*_PASS_HASH`, se usa hash PBKDF2 y se ignora `*_PASS` para ese rol.
+
+Formato de hash soportado:
+
+`pbkdf2_sha256$<iteraciones>$<salt_base64url>$<digest_base64url>`
+
+Ejemplo rapido para generar hash en Python:
+
+```powershell
+python -c "import os,base64,hashlib;pwd='cambia_esta_clave';salt=os.urandom(16);it=260000;d=hashlib.pbkdf2_hmac('sha256',pwd.encode(),salt,it);enc=lambda b:base64.urlsafe_b64encode(b).decode().rstrip('=');print(f'pbkdf2_sha256${it}${enc(salt)}${enc(d)}')"
+```
 
 Ejemplo PowerShell:
 

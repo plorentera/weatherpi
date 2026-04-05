@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="Acceso a Meteo Station" />
+  <title>Login - Meteo Station</title>
+  <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-body-tertiary">
+  <main class="container py-5" style="max-width:560px;">
+    <section class="card shadow-sm">
+      <div class="card-body p-4 p-lg-5">
+        <div class="text-uppercase text-secondary small fw-semibold mb-2">Acceso protegido</div>
+        <h1 class="h3 fw-semibold mb-3">Inicia sesion en Meteo Station</h1>
+        <p class="text-secondary mb-4">Usa credenciales reader para lectura o admin para operaciones de escritura.</p>
+
+        <form method="post" action="/login" class="vstack gap-3">
+          <input id="nextPath" type="hidden" name="next" value="/">
+          <div>
+            <label class="form-label" for="username">Usuario</label>
+            <input id="username" name="username" type="text" class="form-control form-control-lg" autocomplete="username" required>
+          </div>
+          <div>
+            <label class="form-label" for="password">Contrasena</label>
+            <input id="password" name="password" type="password" class="form-control form-control-lg" autocomplete="current-password" required>
+          </div>
+          <button class="btn btn-primary btn-lg" type="submit">Entrar</button>
+        </form>
+
+        <div id="loginError" class="alert alert-danger mt-3 mb-0 py-2 d-none">Credenciales invalidas.</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next") || "/";
+      const error = params.get("error");
+
+      document.getElementById("nextPath").value = next;
+
+      if (error === "1") {
+        document.getElementById("loginError").classList.remove("d-none");
+      }
+    })();
+  </script>
+</body>
+</html>

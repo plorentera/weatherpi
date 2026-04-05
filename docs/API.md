@@ -18,6 +18,7 @@ http://127.0.0.1:8000
 - Todo el webserver y toda la API requieren autenticacion.
 - En navegador, el acceso recomendado es mediante `GET /login` (sesion por cookie).
 - Para integraciones, puedes usar HTTP Basic (`Authorization: Basic ...`).
+- Para contrasenas, se admite modo plano o hash PBKDF2 por variable de entorno.
 - Roles soportados:
   - `reader`: acceso de solo lectura (`GET`, `HEAD`, `OPTIONS`).
   - `admin`: acceso completo (lectura + escritura).
@@ -26,6 +27,19 @@ http://127.0.0.1:8000
 - Respuestas de negocio en JSON (`application/json`).
 - Endpoints de export devuelven CSV (`text/csv`).
 - Timestamps en formato epoch (segundos UTC).
+
+Variables de entorno de seguridad:
+
+- `WEATHERPI_READER_USER`, `WEATHERPI_READER_PASS`, `WEATHERPI_READER_PASS_HASH`
+- `WEATHERPI_ADMIN_USER`, `WEATHERPI_ADMIN_PASS`, `WEATHERPI_ADMIN_PASS_HASH`
+- `WEATHERPI_SESSION_SECRET`
+- `WEATHERPI_COOKIE_SECURE`
+- `WEATHERPI_COOKIE_SAMESITE`
+- `WEATHERPI_SESSION_TTL_SECONDS`
+
+Formato de hash admitido (`*_PASS_HASH`):
+
+`pbkdf2_sha256$<iteraciones>$<salt_base64url>$<digest_base64url>`
 
 ## Indice rapido
 

@@ -7,12 +7,11 @@ import secrets
 import json
 import hmac
 import hashlib
-from html import escape
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse, PlainTextResponse, JSONResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse, JSONResponse, RedirectResponse
 
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -47,23 +46,89 @@ logger = logging.getLogger("weatherpi.api")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 READER_USER_ENV = "WEATHERPI_READER_USER"
 READER_PASS_ENV = "WEATHERPI_READER_PASS"
+READER_PASS_HASH_ENV = "WEATHERPI_READER_PASS_HASH"
 ADMIN_USER_ENV = "WEATHERPI_ADMIN_USER"
 ADMIN_PASS_ENV = "WEATHERPI_ADMIN_PASS"
+ADMIN_PASS_HASH_ENV = "WEATHERPI_ADMIN_PASS_HASH"
 SESSION_SECRET_ENV = "WEATHERPI_SESSION_SECRET"
 SESSION_COOKIE_NAME = "weatherpi_session"
 SESSION_TTL_SECONDS = 12 * 3600
 READER_USER = os.getenv(READER_USER_ENV, "reader").strip() or "reader"
 READER_PASS = os.getenv(READER_PASS_ENV, "reader").strip() or "reader"
+READER_PASS_HASH = os.getenv(READER_PASS_HASH_ENV, "").strip()
 ADMIN_USER = os.getenv(ADMIN_USER_ENV, "admin").strip() or "admin"
 ADMIN_PASS = os.getenv(ADMIN_PASS_ENV, "admin").strip() or "admin"
+ADMIN_PASS_HASH = os.getenv(ADMIN_PASS_HASH_ENV, "").strip()
 SESSION_SECRET = os.getenv(SESSION_SECRET_ENV, "change-me-weatherpi-session-secret").strip() or "change-me-weatherpi-session-secret"
+SESSION_COOKIE_SECURE = os.getenv("WEATHERPI_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+SESSION_COOKIE_SAMESITE = os.getenv("WEATHERPI_COOKIE_SAMESITE", "lax").strip().lower()
+if SESSION_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    SESSION_COOKIE_SAMESITE = "lax"
+try:
+    SESSION_COOKIE_MAX_AGE = int(os.getenv("WEATHERPI_SESSION_TTL_SECONDS", str(SESSION_TTL_SECONDS)).strip())
+except ValueError:
+    SESSION_COOKIE_MAX_AGE = SESSION_TTL_SECONDS
+SESSION_COOKIE_MAX_AGE = max(300, min(SESSION_COOKIE_MAX_AGE, 7 * 24 * 3600))
+PBKDF2_SCHEME = "pbkdf2_sha256"
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(value: str) -> Optional[bytes]:
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        return base64.urlsafe_b64decode(padded.encode("ascii"))
+    except Exception:
+        return None
+
+
+def _verify_password(plain_password: str, stored_hash: str) -> bool:
+    # Format: pbkdf2_sha256$<iterations>$<salt_b64url>$<hash_b64url>
+    try:
+        scheme, iter_raw, salt_raw, digest_raw = stored_hash.split("$", 3)
+        if scheme != PBKDF2_SCHEME:
+            return False
+        iterations = int(iter_raw)
+        if iterations < 100_000:
+            return False
+    except Exception:
+        return False
+
+    salt = _b64url_decode(salt_raw)
+    expected = _b64url_decode(digest_raw)
+    if not salt or not expected:
+        return False
+
+    actual = hashlib.pbkdf2_hmac("sha256", plain_password.encode("utf-8"), salt, iterations)
+    return secrets.compare_digest(actual, expected)
+
+
+def _safe_next_path(next_path: str) -> str:
+    candidate = (next_path or "/").strip()
+    if not candidate.startswith("/"):
+        return "/"
+    if candidate.startswith("//"):
+        return "/"
+    if candidate.startswith("/login"):
+        return "/"
+    return candidate
 
 
 def _role_for_credentials(username: str, password: str) -> Optional[str]:
-    if secrets.compare_digest(username, ADMIN_USER) and secrets.compare_digest(password, ADMIN_PASS):
-        return "admin"
-    if secrets.compare_digest(username, READER_USER) and secrets.compare_digest(password, READER_PASS):
-        return "reader"
+    if secrets.compare_digest(username, ADMIN_USER):
+        if ADMIN_PASS_HASH and _verify_password(password, ADMIN_PASS_HASH):
+            return "admin"
+        if not ADMIN_PASS_HASH and secrets.compare_digest(password, ADMIN_PASS):
+            return "admin"
+
+    if secrets.compare_digest(username, READER_USER):
+        if READER_PASS_HASH and _verify_password(password, READER_PASS_HASH):
+            return "reader"
+        if not READER_PASS_HASH and secrets.compare_digest(password, READER_PASS):
+            return "reader"
+
     return None
 
 
@@ -75,10 +140,10 @@ def _create_session_token(username: str, role: str) -> str:
     payload = {
         "u": username,
         "r": role,
-        "exp": int(time.time()) + SESSION_TTL_SECONDS,
+        "exp": int(time.time()) + SESSION_COOKIE_MAX_AGE,
     }
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    payload_b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    payload_b64 = _b64url_encode(raw)
     sig = _sign_session_payload(payload_b64)
     return f"{payload_b64}.{sig}"
 
@@ -93,8 +158,10 @@ def _parse_session_token(token: Optional[str]) -> Optional[dict]:
         return None
 
     try:
-        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        raw = _b64url_decode(payload_b64)
+        if not raw:
+            return None
+        payload = json.loads(raw.decode("utf-8"))
     except Exception:
         return None
 
@@ -216,44 +283,11 @@ async def auth_middleware(request: Request, call_next):
 
 
 @app.get("/login", include_in_schema=False)
-def login_page(next: str = "/", error: int = 0):
-        err_html = "<div class='alert alert-danger mt-3 mb-0 py-2'>Credenciales invalidas.</div>" if error else ""
-        safe_next = escape(next)
-        html = f"""<!doctype html>
-<html lang=\"es\">
-<head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-    <title>Login - Meteo Station</title>
-    <link href=\"/vendor/bootstrap/bootstrap.min.css\" rel=\"stylesheet\">
-    <link rel=\"stylesheet\" href=\"/style.css\" />
-</head>
-<body class=\"bg-body-tertiary\">
-    <main class=\"container py-5\" style=\"max-width:560px;\">
-        <section class=\"card shadow-sm\">
-            <div class=\"card-body p-4 p-lg-5\">
-                <div class=\"text-uppercase text-secondary small fw-semibold mb-2\">Acceso protegido</div>
-                <h1 class=\"h3 fw-semibold mb-3\">Inicia sesion en Meteo Station</h1>
-                <p class=\"text-secondary mb-4\">Usa credenciales reader para lectura o admin para operaciones de escritura.</p>
-                <form method=\"post\" action=\"/login\" class=\"vstack gap-3\">
-                    <input type=\"hidden\" name=\"next\" value=\"{safe_next}\">
-                    <div>
-                        <label class=\"form-label\" for=\"username\">Usuario</label>
-                        <input id=\"username\" name=\"username\" type=\"text\" class=\"form-control form-control-lg\" autocomplete=\"username\" required>
-                    </div>
-                    <div>
-                        <label class=\"form-label\" for=\"password\">Contrasena</label>
-                        <input id=\"password\" name=\"password\" type=\"password\" class=\"form-control form-control-lg\" autocomplete=\"current-password\" required>
-                    </div>
-                    <button class=\"btn btn-primary btn-lg\" type=\"submit\">Entrar</button>
-                </form>
-                {err_html}
-            </div>
-        </section>
-    </main>
-</body>
-</html>"""
-        return HTMLResponse(content=html)
+def login_page():
+    login_path = static_dir / "login.html"
+    if not login_path.exists():
+        raise HTTPException(status_code=404, detail="login page not found")
+    return FileResponse(path=login_path, media_type="text/html")
 
 
 @app.post("/login", include_in_schema=False)
@@ -262,7 +296,7 @@ async def login_submit(request: Request):
     fields = parse_qs(body)
     username = (fields.get("username", [""])[0] or "").strip()
     password = fields.get("password", [""])[0] or ""
-    next = fields.get("next", ["/"])[0] or "/"
+    next = _safe_next_path(fields.get("next", ["/"])[0] or "/")
 
     role = _role_for_credentials(username, password)
     if not role:
@@ -274,9 +308,9 @@ async def login_submit(request: Request):
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        samesite="lax",
-        secure=False,
-        max_age=SESSION_TTL_SECONDS,
+        samesite=SESSION_COOKIE_SAMESITE,
+        secure=SESSION_COOKIE_SECURE,
+        max_age=SESSION_COOKIE_MAX_AGE,
     )
     return response
 
@@ -432,38 +466,10 @@ def api_markdown_doc(raw: bool = False):
 
     if raw:
         return PlainTextResponse(content=doc_path.read_text(encoding="utf-8"), media_type="text/markdown")
-
-    content = doc_path.read_text(encoding="utf-8")
-    html = f"""<!doctype html>
-<html lang="es">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>API - Meteo Station</title>
-    <link href="/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {{ background: #f8f9fa; }}
-        .doc-shell {{ max-width: 1100px; }}
-        .doc-body {{ white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }}
-    </style>
-</head>
-<body>
-    <main class="container doc-shell py-4 py-lg-5">
-        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-            <div>
-                <div class="text-uppercase text-secondary small fw-semibold mb-2">Documentacion consultable</div>
-                <h1 class="h3 fw-semibold mb-0">docs/API.md</h1>
-            </div>
-            <a class="btn btn-outline-secondary" href="/docs/API.md?raw=1" target="_blank" rel="noreferrer">Abrir raw</a>
-        </div>
-        <section class="card shadow-sm">
-            <div class="card-body p-4 p-lg-5 doc-body">{escape(content)}</div>
-        </section>
-    </main>
-</body>
-</html>"""
-
-    return HTMLResponse(content=html)
+    docs_view_path = static_dir / "docs_viewer.html"
+    if not docs_view_path.exists():
+        raise HTTPException(status_code=404, detail="docs viewer not found")
+    return FileResponse(path=docs_view_path, media_type="text/html")
 
 
 app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
@@ -476,9 +482,16 @@ def startup_notice() -> None:
         READER_USER,
         ADMIN_USER,
     )
-    if READER_USER == "reader" and READER_PASS == "reader":
-        logger.warning("Reader credentials are using defaults; set %s/%s", READER_USER_ENV, READER_PASS_ENV)
-    if ADMIN_USER == "admin" and ADMIN_PASS == "admin":
-        logger.warning("Admin credentials are using defaults; set %s/%s", ADMIN_USER_ENV, ADMIN_PASS_ENV)
-    if SESSION_SECRET == "change-me-weatherpi-session-secret":
-        logger.warning("Session secret is using default; set %s", SESSION_SECRET_ENV)
+    logger.info("Credential mode: %s", "hashed" if (READER_PASS_HASH or ADMIN_PASS_HASH) else "plaintext")
+    if not READER_PASS_HASH and READER_USER == "reader" and READER_PASS == "reader":
+        logger.warning("Reader credentials are using defaults; set %s or %s", READER_PASS_HASH_ENV, READER_PASS_ENV)
+    if not ADMIN_PASS_HASH and ADMIN_USER == "admin" and ADMIN_PASS == "admin":
+        logger.warning("Admin credentials are using defaults; set %s or %s", ADMIN_PASS_HASH_ENV, ADMIN_PASS_ENV)
+    if len(SESSION_SECRET) < 32 or SESSION_SECRET == "change-me-weatherpi-session-secret":
+        logger.warning("Session secret is weak/default; set %s to a strong random value", SESSION_SECRET_ENV)
+    logger.info(
+        "Session cookie config: secure=%s samesite=%s ttl=%ss",
+        SESSION_COOKIE_SECURE,
+        SESSION_COOKIE_SAMESITE,
+        SESSION_COOKIE_MAX_AGE,
+    )
