@@ -1,5 +1,17 @@
-fastapi
-uvicorn[standard]
-pydantic
-httpx
-paho-mqtt
+# Production Dependencies
+fastapi==0.135.3
+uvicorn[standard]==0.43.0
+pydantic==2.12.5
+pydantic-core==2.41.5
+httpx==0.28.1
+paho-mqtt==2.1.0
+python-dotenv==1.2.2
+starlette==1.0.0
+h11==0.16.0
+websockets==16.0
+httptools==0.7.1
+watchfiles==1.1.1
+click==8.3.2
+typing-extensions==4.15.0
+anyio==4.13.0
+pyyaml==6.0.3

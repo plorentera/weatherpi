@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  weatherpi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: weatherpi
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - WEATHERPI_ADMIN_USER=admin
+      - WEATHERPI_ADMIN_PASS=admin  # Change in production!
+      - WEATHERPI_SESSION_SECRET=change-me-in-production
+      - DEBUG=false
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - weatherpi-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Optional: MQTT broker (comment out if using external MQTT)
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: weatherpi-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-logs:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      - weatherpi-network
+    profiles:
+      - with-mqtt
+
+volumes:
+  mosquitto-data:
+  mosquitto-logs:
+
+networks:
+  weatherpi-network:
+    driver: bridge

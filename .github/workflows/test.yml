@@ -1,0 +1,86 @@
+name: Tests & Quality
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check api/ collector/ common/ tests/ --select E,W,F
+
+      - name: Format check with black
+        run: black --check api/ collector/ common/ tests/
+
+      - name: Check imports with isort
+        run: isort --check-only api/ collector/ common/ tests/
+
+      - name: Type check with mypy
+        run: mypy api/ collector/ common/ --no-error-summary || echo "mypy checks completed"
+
+      - name: Run tests with pytest
+        run: pytest -v --cov=api --cov=collector --cov=common --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint
+          pip install -r requirements.txt
+
+      - name: Pylint score
+        run: pylint api/ collector/ common/ --exit-zero || echo "Pylint check completed"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Run Bandit security check
+        run: |
+          pip install bandit
+          bandit -r api/ collector/ common/ -ll || echo "Bandit check completed"
