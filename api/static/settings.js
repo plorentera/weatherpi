@@ -1,21 +1,11 @@
 function $(id) { return document.getElementById(id); }
 
-const API_KEY_STORAGE_KEY = "weatherpi.apiKey";
-
 function msg(text) { $("msg").textContent = text; }
 
 function setSaving(isSaving) {
   const button = $("saveBtn");
   button.disabled = isSaving;
   button.textContent = isSaving ? "Guardando…" : "Guardar cambios";
-}
-
-function getApiHeaders(includeJson = false) {
-  const headers = {};
-  const apiKey = localStorage.getItem(API_KEY_STORAGE_KEY) || "";
-  if (apiKey) headers["X-API-Key"] = apiKey;
-  if (includeJson) headers["Content-Type"] = "application/json";
-  return headers;
 }
 
 function asInt(v, fallback) {
@@ -99,7 +89,7 @@ function updateUtcPreview() {
    LOAD CONFIG
    ========================================================= */
 async function loadConfig() {
-  const res = await fetch("/api/config", { cache: "no-store", headers: getApiHeaders(false) });
+  const res = await fetch("/api/config", { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const data = await res.json();
@@ -139,7 +129,6 @@ async function loadConfig() {
   $("mqTopic").value = mq.topic ?? "meteo/measurements";
 
   $("collectorEnabled").checked = collector.enabled !== false;
-  $("apiKey").value = localStorage.getItem(API_KEY_STORAGE_KEY) || "";
 
   updateUtcPreview();
   updateExportsUI();
@@ -203,7 +192,7 @@ async function saveConfig() {
 
   const res = await fetch("/api/config", {
     method: "PUT",
-    headers: getApiHeaders(true),
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
@@ -228,7 +217,6 @@ async function saveConfig() {
 $("saveBtn").addEventListener("click", () => {
   msg("Guardando…");
   setSaving(true);
-  localStorage.setItem(API_KEY_STORAGE_KEY, $("apiKey").value.trim());
   saveConfig()
     .catch(e => msg("❌ Error guardando: " + e.message))
     .finally(() => setSaving(false));

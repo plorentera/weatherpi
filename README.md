@@ -23,7 +23,7 @@ Recoger mediciones ambientales, visualizarlas en un dashboard web, y gestionar s
 
 ### Fuera de alcance por ahora
 
-- Autenticacion/autorizacion avanzada (usuarios, roles, tokens).
+- Autenticacion/autorizacion avanzada (OIDC, MFA, SSO, gestion centralizada).
 - Observabilidad completa (metricas Prometheus, tracing, alerting).
 - Drivers de sensores reales y calibracion metrologica formal.
 - CI/CD y cobertura de tests completa.
@@ -117,6 +117,48 @@ python -m collector.outputs_worker
 python -m collector.backup_worker
 ```
 
+## Autenticacion y autorizacion
+
+Todo el webserver y toda la API estan protegidos.
+
+Para acceso web (navegador):
+
+- `GET /login` muestra pantalla de login.
+- Login correcto crea sesion por cookie `HttpOnly`.
+- `POST /logout` cierra sesion.
+
+Para integraciones API (scripts/servicios):
+
+- Se mantiene soporte HTTP Basic en cabecera `Authorization`.
+
+Roles:
+
+- `reader`: solo lectura (`GET`, `HEAD`, `OPTIONS`).
+- `admin`: lectura y escritura (PUT/POST/DELETE).
+
+Variables de entorno (opcionales, con defaults):
+
+- `WEATHERPI_READER_USER` (default: `reader`)
+- `WEATHERPI_READER_PASS` (default: `reader`)
+- `WEATHERPI_ADMIN_USER` (default: `admin`)
+- `WEATHERPI_ADMIN_PASS` (default: `admin`)
+
+Ejemplo PowerShell:
+
+```powershell
+$env:WEATHERPI_READER_USER = "viewer"
+$env:WEATHERPI_READER_PASS = "viewer_strong_pass"
+$env:WEATHERPI_ADMIN_USER = "admin"
+$env:WEATHERPI_ADMIN_PASS = "admin_strong_pass"
+python -m scripts.run_all
+```
+
+Comportamiento:
+
+- Sin credenciales o invalidas: `401`.
+- Credenciales `reader` en endpoint de escritura: `403`.
+- Credenciales `admin` validas: acceso completo.
+
 ## UI y rutas
 
 Pantallas:
@@ -166,30 +208,6 @@ Validaciones relevantes (`PUT /api/config`):
 - Webhook habilitado requiere URL HTTP(S) valida.
 - MQTT habilitado requiere `host`, `topic` y `port` en rango 1..65535.
 
-## Seguridad de escritura (opcional)
-
-Puedes proteger endpoints de escritura mediante API key.
-
-1. Define variable de entorno en el servidor:
-
-```powershell
-$env:WEATHERPI_API_KEY = "tu_clave"
-python -m scripts.run_all
-```
-
-2. Endpoints protegidos cuando esta activa:
-
-- `PUT /api/config`
-- `POST /api/outbox/retry_failed`
-- `POST /api/outbox/purge_sent`
-
-3. Codigos de respuesta esperados:
-
-- `401` si falta `X-API-Key`.
-- `403` si `X-API-Key` es incorrecta.
-
-La UI de configuracion (`/settings.html`) permite guardar la clave en el navegador (localStorage) para usarla en acciones protegidas.
-
 ## Librerias en local
 
 Frontend local vendorizado:
@@ -204,7 +222,6 @@ Dependencias Python cacheadas:
 
 ## Limitaciones conocidas
 
-- API sin autenticacion (solo recomendado para red local controlada).
 - Sin test suite completa todavia.
 - Sensor por defecto mock; pendiente integrar drivers reales estables.
 - SQLite adecuado para edge/local, no para carga multiusuario alta.
@@ -217,7 +234,7 @@ Dependencias Python cacheadas:
 
 ## Roadmap propuesto
 
-1. Seguridad API (auth + roles).
+1. Endurecer autenticacion (hash de credenciales, secret manager, rotacion).
 2. Tests unitarios/integracion + CI.
 3. Observabilidad (logs estructurados + metricas + alertas).
 4. Drivers reales de sensores y validacion de calidad de dato.

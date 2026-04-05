@@ -15,9 +15,14 @@ http://127.0.0.1:8000
 
 ## Convenciones
 
-- API sin autenticacion por defecto (entorno local).
-- Puedes activar proteccion de escritura configurando la variable de entorno `WEATHERPI_API_KEY`.
-- Con proteccion activa, los endpoints de escritura requieren cabecera `X-API-Key`.
+- Todo el webserver y toda la API requieren autenticacion.
+- En navegador, el acceso recomendado es mediante `GET /login` (sesion por cookie).
+- Para integraciones, puedes usar HTTP Basic (`Authorization: Basic ...`).
+- Roles soportados:
+  - `reader`: acceso de solo lectura (`GET`, `HEAD`, `OPTIONS`).
+  - `admin`: acceso completo (lectura + escritura).
+- Cualquier peticion sin credenciales validas devuelve `401` con `WWW-Authenticate: Basic`.
+- Cualquier peticion de escritura con rol `reader` devuelve `403` (`admin role required`).
 - Respuestas de negocio en JSON (`application/json`).
 - Endpoints de export devuelven CSV (`text/csv`).
 - Timestamps en formato epoch (segundos UTC).
@@ -26,6 +31,9 @@ http://127.0.0.1:8000
 
 | Metodo | Ruta | Descripcion |
 |---|---|---|
+| GET | `/login` | Pantalla de acceso web |
+| POST | `/login` | Inicio de sesion (cookie) |
+| POST | `/logout` | Cierre de sesion |
 | GET | `/api/status` | Estado del servicio y recuento de lecturas |
 | GET | `/api/latest` | Ultima medicion registrada |
 | GET | `/api/config` | Lee configuracion actual |
@@ -205,10 +213,7 @@ Respuesta 200:
 
 Actualiza configuracion.
 
-Si `WEATHERPI_API_KEY` esta activa en el servidor:
-
-- sin `X-API-Key` -> `401`.
-- con key incorrecta -> `403`.
+Requiere credenciales `admin` (escritura).
 
 Reglas de validacion de API:
 
@@ -220,8 +225,8 @@ Reglas de validacion de API:
 
 ```bash
 curl -X PUT http://127.0.0.1:8000/api/config \
+  -u admin:admin \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: tu_clave_si_esta_activada" \
   -d '{
     "station_id": "meteo-casa",
     "sample_interval_seconds": 10,
@@ -317,7 +322,7 @@ Reencola todos los registros en `failed` a `pending`.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/outbox/retry_failed \
-  -H "X-API-Key: tu_clave_si_esta_activada"
+  -u admin:admin
 ```
 
 Respuesta 200:
@@ -339,7 +344,7 @@ Query params:
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/outbox/purge_sent?keep_last=500" \
-  -H "X-API-Key: tu_clave_si_esta_activada"
+  -u admin:admin
 ```
 
 Respuesta 200:
@@ -423,23 +428,28 @@ Errores:
 
 ```js
 const base = "http://127.0.0.1:8000";
+const basic = "Basic " + btoa("reader:reader");
 
 async function getLatest() {
-  const res = await fetch(`${base}/api/latest`);
+  const res = await fetch(`${base}/api/latest`, { headers: { Authorization: basic } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
   return json.data;
 }
 
 async function updateInterval(seconds) {
-  const cfgRes = await fetch(`${base}/api/config`);
+  const adminBasic = "Basic " + btoa("admin:admin");
+  const cfgRes = await fetch(`${base}/api/config`, { headers: { Authorization: adminBasic } });
   const cfg = (await cfgRes.json()).config;
 
   cfg.sample_interval_seconds = seconds;
 
   const putRes = await fetch(`${base}/api/config`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: adminBasic,
+    },
     body: JSON.stringify(cfg),
   });
 
@@ -455,15 +465,16 @@ async function updateInterval(seconds) {
 import httpx
 
 BASE = "http://127.0.0.1:8000"
+AUTH = ("admin", "admin")
 
 with httpx.Client(timeout=10) as client:
-    status = client.get(f"{BASE}/api/status").json()
-    latest = client.get(f"{BASE}/api/latest").json()
+  status = client.get(f"{BASE}/api/status", auth=AUTH).json()
+  latest = client.get(f"{BASE}/api/latest", auth=AUTH).json()
 
-    cfg = client.get(f"{BASE}/api/config").json()["config"]
+  cfg = client.get(f"{BASE}/api/config", auth=AUTH).json()["config"]
     cfg["sample_interval_seconds"] = 15
 
-    updated = client.put(f"{BASE}/api/config", json=cfg).json()
+  updated = client.put(f"{BASE}/api/config", json=cfg, auth=AUTH).json()
     if not updated.get("ok"):
         raise RuntimeError(updated.get("error", "Error actualizando config"))
 
